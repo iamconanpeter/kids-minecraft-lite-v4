@@ -59,7 +59,7 @@
 
 - [x] Write `docs/release-summary.md`
   - Acceptance: feature checklist + quality output + Codex snippets + “why this now feels like Minecraft for kids”.
-- [ ] Initialize git and commit final state
+- [x] Initialize git and commit final state
   - Acceptance: clean history with clear final commit.
-- [ ] Push repository to GitHub `iamconanpeter/kids-minecraft-lite-v4`
+- [x] Push repository to GitHub `iamconanpeter/kids-minecraft-lite-v4`
   - Acceptance: remote repo accessible with final commit.
