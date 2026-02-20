@@ -1,0 +1,14 @@
+**Gaps / Risks (review findings first)**
+- High: No verifiable v4.1 requirement source in-repo; `docs/codex-ux-v4_1-output.txt` is empty, so full compliance can’t be strictly checked.
+- Medium: “Parent” control is a 1-tap toggle with no gate/challenge, so if v4.1 expected actual parental gating this is incomplete (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:252`, `app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:368`).
+- Medium: `statusMessage` is still produced by engine but no longer rendered in view, which may remove feedback cues (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteEngine.kt:71`, `app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:151`).
+- Medium: No new tests for onboarding counters/save-restore/panel interactions in this diff; validation gap.
+- Build validation blocked locally: `./gradlew test assembleDebug` fails under Java 11 (project now needs Java 17).
+
+**Implemented in current diff**
+- Added onboarding progress state (`blocksMined`, `blocksPlaced`, `onboardingShelterBuilt`) with save/restore support (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteEngine.kt:68`, `app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteEngine.kt:393`, `app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteEngine.kt:483`).
+- Added top onboarding bar with Mine/Place/Shelter steps and active prompt (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:173`).
+- HUD compacted to icon-first metrics + shelter badge (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:151`, `app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:411`).
+- Bottom controls redesigned to larger icon+caption buttons; easy mode moved into new parent panel (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:228`, `app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:309`).
+- Craft panel restyled with unlock/lock visuals and star cues (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteView.kt:255`).
+- Engine status text shifted to short emoji-heavy messages (`app/src/main/java/com/iamconanpeter/kidsminecraftlite/BlockQuestLiteEngine.kt:257`).

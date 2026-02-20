@@ -105,4 +105,40 @@ class BlockQuestLiteEngineTest {
         assertEquals(engine.currentState().shelterScore, restored.currentState().shelterScore)
         assertNotEquals("", payload)
     }
+
+    @Test
+    fun onboardingProgressTracksAndPersists() {
+        val engine = BlockQuestLiteEngine()
+
+        assertEquals(0, engine.currentState().blocksMined)
+        assertEquals(0, engine.currentState().blocksPlaced)
+        assertFalse(engine.currentState().onboardingShelterBuilt)
+
+        assertTrue(engine.mineBlock(1, BlockQuestLiteEngine.HEIGHT - 4))
+
+        engine.toggleMode()
+        while (engine.currentPlaceItem() != BlockQuestLiteItem.WOOD) {
+            engine.cyclePlaceItem()
+        }
+        engine.debugGrant(BlockQuestLiteItem.WOOD, 4)
+        assertTrue(engine.placeBlock(2, 2))
+
+        val ax = BlockQuestLiteEngine.WIDTH / 2
+        val ay = 2
+        engine.debugSetBlock(ax - 1, ay, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax + 1, ay, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax, ay - 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax, ay + 1, BlockQuestLiteBlock.WOOD)
+
+        val progressed = engine.currentState()
+        assertTrue(progressed.blocksMined >= 1)
+        assertTrue(progressed.blocksPlaced >= 1)
+        assertTrue(progressed.onboardingShelterBuilt)
+
+        val payload = engine.toSavePayload()
+        val restored = BlockQuestLiteEngine(payload).currentState()
+        assertEquals(progressed.blocksMined, restored.blocksMined)
+        assertEquals(progressed.blocksPlaced, restored.blocksPlaced)
+        assertTrue(restored.onboardingShelterBuilt)
+    }
 }

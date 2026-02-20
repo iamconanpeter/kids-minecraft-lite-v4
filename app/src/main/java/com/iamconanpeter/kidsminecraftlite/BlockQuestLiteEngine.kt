@@ -65,6 +65,9 @@ data class BlockQuestLiteState(
     val glowmewGiftMoments: Int,
     val skyWyrmEvents: Int,
     val rescuedCount: Int,
+    val blocksMined: Int,
+    val blocksPlaced: Int,
+    val onboardingShelterBuilt: Boolean,
     val statusMessage: String
 )
 
@@ -186,6 +189,10 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
     private var skyWyrmEvents = 0
     private var rescuedCount = 0
 
+    private var blocksMined = 0
+    private var blocksPlaced = 0
+    private var onboardingShelterBuilt = false
+
     private var giftCooldownTicks = 20
     private var nightDamageCooldown = 10
     private var statusMessage = "Tap blocks to mine!"
@@ -227,6 +234,9 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             glowmewGiftMoments = glowmewGiftMoments,
             skyWyrmEvents = skyWyrmEvents,
             rescuedCount = rescuedCount,
+            blocksMined = blocksMined,
+            blocksPlaced = blocksPlaced,
+            onboardingShelterBuilt = onboardingShelterBuilt,
             statusMessage = statusMessage
         )
     }
@@ -244,18 +254,17 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         } else {
             BlockQuestLiteInputMode.MINE
         }
-        statusMessage = if (mode == BlockQuestLiteInputMode.MINE) "⛏️ Mine mode" else "🧱 Place mode"
+        statusMessage = if (mode == BlockQuestLiteInputMode.MINE) "⛏️" else "🧱"
     }
 
     fun cyclePlaceItem() {
         selectedPlaceIndex = (selectedPlaceIndex + 1) % PLACEABLE_ITEMS.size
-        val item = currentPlaceItem()
-        statusMessage = "Selected ${item.name.lowercase()}"
+        statusMessage = "🎒 ${currentPlaceItem().name.lowercase()}"
     }
 
     fun toggleEasyMode() {
         easyMode = !easyMode
-        statusMessage = if (easyMode) "🙂 Easy mode" else "🔥 Brave mode"
+        statusMessage = if (easyMode) "🙂 Calm mode" else "🔥 Brave mode"
     }
 
     fun tapTile(x: Int, y: Int): Boolean {
@@ -270,7 +279,7 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         if (!inBounds(x, y)) return false
         val current = getBlock(x, y)
         if (current == BlockQuestLiteBlock.AIR) {
-            statusMessage = "Nothing to mine"
+            statusMessage = "❔"
             return false
         }
 
@@ -279,42 +288,46 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         val item = toItem(current)
         if (item != null) {
             addInventory(item, 1)
+            blocksMined += 1
             if (current == BlockQuestLiteBlock.STONE && ((x + y + dayNumber + cycleTick) % 5 == 0)) {
                 addInventory(BlockQuestLiteItem.CRYSTAL, 1)
-                statusMessage = "Found a crystal!"
+                statusMessage = "💎"
             } else {
-                statusMessage = "+1 ${item.name.lowercase()}"
+                statusMessage = "⛏️+1"
             }
         }
 
         shelterScore = computeShelterScore()
+        updateOnboardingShelterProgress()
         return true
     }
 
     fun placeBlock(x: Int, y: Int): Boolean {
         if (!inBounds(x, y)) return false
         if (getBlock(x, y) != BlockQuestLiteBlock.AIR) {
-            statusMessage = "Space is full"
+            statusMessage = "🚫"
             return false
         }
 
         val selectedItem = currentPlaceItem()
         val selectedBlock = toBlock(selectedItem)
         if (selectedBlock == null) {
-            statusMessage = "Cannot place this item"
+            statusMessage = "🚫"
             return false
         }
 
         if (getInventory(selectedItem) <= 0) {
-            statusMessage = "Need ${selectedItem.name.lowercase()}"
+            statusMessage = "📦❌"
             return false
         }
 
         world[idx(x, y)] = selectedBlock.ordinal
         addInventory(selectedItem, -1)
+        blocksPlaced += 1
 
         shelterScore = computeShelterScore()
-        statusMessage = "Placed ${selectedItem.name.lowercase()}"
+        updateOnboardingShelterProgress()
+        statusMessage = "🧱✅"
         return true
     }
 
@@ -323,13 +336,13 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             ?: return false
 
         if (stars < recipe.starsRequired) {
-            statusMessage = "Need ${recipe.starsRequired}⭐"
+            statusMessage = "🔒 ${recipe.starsRequired}⭐"
             return false
         }
 
         for ((item, amount) in recipe.inputs) {
             if (getInventory(item) < amount) {
-                statusMessage = "Need more ${item.name.lowercase()}"
+                statusMessage = "📦❌"
                 return false
             }
         }
@@ -340,7 +353,7 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         addInventory(recipe.output.first, recipe.output.second)
 
         craftedThisCycle = true
-        statusMessage = "Crafted ${recipe.output.first.name.lowercase()}"
+        statusMessage = "🧪✅"
         return true
     }
 
@@ -374,6 +387,7 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         }
 
         shelterScore = computeShelterScore()
+        updateOnboardingShelterProgress()
     }
 
     fun toSavePayload(): String {
@@ -401,7 +415,10 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             skyWyrmEvents,
             rescuedCount,
             giftCooldownTicks,
-            nightDamageCooldown
+            nightDamageCooldown,
+            blocksMined,
+            blocksPlaced,
+            onboardingShelterBuilt
         ).joinToString(",")
 
         return listOf(worldString, inventoryString, scalar).joinToString(";")
@@ -415,6 +432,7 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         if (!inBounds(x, y)) return
         world[idx(x, y)] = block.ordinal
         shelterScore = computeShelterScore()
+        updateOnboardingShelterProgress()
     }
 
     private fun restore(payload: String): Boolean {
@@ -462,6 +480,9 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             rescuedCount = max(0, s[17].toIntOrNull() ?: 0)
             giftCooldownTicks = max(0, s[18].toIntOrNull() ?: 20)
             nightDamageCooldown = max(1, s[19].toIntOrNull() ?: 10)
+            blocksMined = max(0, s.getOrNull(20)?.toIntOrNull() ?: 0)
+            blocksPlaced = max(0, s.getOrNull(21)?.toIntOrNull() ?: 0)
+            onboardingShelterBuilt = s.getOrNull(22)?.toBooleanStrictOrNull() ?: false
 
             true
         } catch (_: Exception) {
@@ -587,6 +608,12 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         score += floorBand * 5
 
         return score.coerceIn(0, 100)
+    }
+
+    private fun updateOnboardingShelterProgress() {
+        if (phase != BlockQuestLitePhase.NIGHT && shelterScore >= 55) {
+            onboardingShelterBuilt = true
+        }
     }
 
     private fun addInventory(item: BlockQuestLiteItem, delta: Int) {
