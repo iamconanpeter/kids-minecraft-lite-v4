@@ -1,0 +1,55 @@
+**Planning Brief (kids-minecraft-lite-v4)**  
+Market snapshot is based on sources available as of **February 20, 2026**.
+
+| Competitor | Platform | What kids love | Churn points | Design takeaway for v4 | Refs |
+|---|---|---|---|---|---|
+| Minecraft (Bedrock app) | iOS, Android | Massive creative freedom; build-anything fantasy; strong multiplayer pull | Repetition over time, mobile friction, marketplace fatigue/microtransaction feel | Keep deep creativity, but add fresh kid-scale goals every session and better mobile UX | [App Store](https://apps.apple.com/us/app/minecraft/id479516143), [Google Play](https://play.google.com/store/apps/details?id=com.mojang.minecraftpe&hl=en_US), [CSM kids reviews](https://www.commonsensemedia.org/app-reviews/minecraft/user-reviews/child) |
+| Minecraft Realms | Online | “My private world with friends” feeling; always-on co-play | Subscription step; setup/permission friction | Offer kid-safe “family realm” mode with very low setup friction and clear value | [Minecraft Realms](https://www.minecraft.net/en-us/realms) |
+| Roblox | iOS, Android, online | Endless novelty, identity expression, social play | Safety/moderation concerns, age mismatch (12+/13+), pay-to-win frustration | For ages 6-7: no open chat by default, curated experiences only, parent dashboard first-class | [Google Play](https://play.google.com/store/apps/details?id=com.roblox.client&hl=en_US), [App Store](https://apps.apple.com/us/app/roblox/id431946152), [Parental Controls](https://about.roblox.com/parental-controls), [CSM kids reviews](https://www.commonsensemedia.org/website-reviews/roblox/user-reviews/child) |
+| Toca Boca World | iOS, Android | Roleplay + character creation + safe single-player storytelling | IAP pressure for more content; bugs/progress issues in reviews | Strong identity/fantasy tools, plus generous free baseline and rock-solid save reliability | [App Store](https://apps.apple.com/us/app/toca-boca-world/id1208138685), [Google Play](https://play.google.com/store/apps/details?id=com.tocaboca.tocalifeworld&hl=en_US), [CSM kids reviews](https://www.commonsensemedia.org/app-reviews/toca-life-world-build-stories/user-reviews/child) |
+| LEGO DUPLO World | iOS, Android | Bright co-play, clear developmental design, low cognitive load | Content paywalls and account/purchase confusion | Keep “immediate joy,” but make entitlement/family access crystal clear and frustration-proof | [App Store](https://apps.apple.com/us/app/lego-duplo-world/id1458749093), [Google Play](https://play.google.com/store/apps/details?id=com.storytoys.lego.duplo.world.kids.play.free.friends.animals.android.googleplay&hl=en_US), [CSM review](https://www.commonsensemedia.org/app-reviews/lego-duplo-world) |
+| PBS KIDS Games | iOS, Android, online | Trusted safe brand, free breadth, familiar characters | Mini-game fragmentation; lighter long-term progression (inference) | Build trust/safety like PBS, but add persistent progression arcs to improve retention | [App Store](https://apps.apple.com/us/app/pbs-kids-games/id1050773989), [CSM review](https://www.commonsensemedia.org/app-reviews/pbs-kids-games) |
+| PK XD | iOS, Android | Avatar fantasy + social world + mini-games | Ads/IAP pressure, boredom over time, behavior moderation concerns | Keep live-world energy, but remove ad pressure and tighten social guardrails | [App Store](https://apps.apple.com/us/app/pk-xd-fun-friends-games/id1449842729), [Google Play](https://play.google.com/store/apps/details?id=com.movile.playkids.pkxd), [CSM review](https://www.commonsensemedia.org/app-reviews/pk-xd-explore-the-universe) |
+| Block Craft 3D | iOS, Android | Quick-start building, no-monster option, huge mainstream reach | Ads + monetization fatigue; teen-skewed framing | Fast “build now” loop is right; keep it kid-safe, ad-light, and mastery-structured | [App Store](https://apps.apple.com/us/app/block-craft-3d-building-games/id981633844), [Google Play](https://play.google.com/store/apps/details?id=com.fungames.blockcraft&hl=en_US) |
+| Animal Jam | iOS, Android, online | Animal identity + social roleplay + den decoration | Safety/moderation and pay-to-play complaints | Combine social imagination with tighter safety defaults and parent controls | [App Store](https://apps.apple.com/us/app/animal-jam/id1003820457), [Animal Jam help](https://help.animaljam.com/hc/en-us/articles/360058760133-How-do-I-play-Animal-Jam), [CSM review](https://www.commonsensemedia.org/website-reviews/animal-jam) |
+| Toca Boca Jr / Jr Classics | iOS, Android | Open-ended play, no-rules creativity, kid-safe framing | Subscription/paywall confusion when moving from free to full | If you sell premium, keep pricing simple and value obvious; no surprise lockouts | [Toca Boca Jr](https://www.tocaboca.com/app/toca-life-school/), [Jr Classics App Store](https://apps.apple.com/us/app/toca-boca-jr-classics/id6741918757), [Piknik pricing/help](https://help.sagomini.com/article/328-why-does-it-say-that-toca-boca-jr-has-in-app-purchases) |
+| Poptropica (online quest world) | Online, iOS, Android | Story-led questing, puzzle adventures, kid-friendly tone | Removed legacy content, ads, membership limitations | Keep fantasy quest cadence and discovery; avoid aggressive gating and ad intrusion | [CSM review](https://www.commonsensemedia.org/website-reviews/poptropica), [App Store](https://apps.apple.com/us/app/poptropica-fun-rpg-adventure/id818709874) |
+
+---
+
+### 2) Child psychology loops → concrete mechanics
+
+| Loop | What 6-7 year olds need | Concrete v4 mechanics |
+|---|---|---|
+| Autonomy | “I choose my adventure” with bounded freedom | 3 daily quest doors (Build, Explore, Help); kid avatar identity system; world themes unlock by play, not purchase |
+| Competence | Fast success, visible mastery | 2-minute starter tasks, then layered challenge; “I made this” gallery; skill badges for simple verbs (stack, connect, decorate, rescue) |
+| Social imagination | Pretend play and narrative projection | NPC friend cast, role cards (builder, explorer, animal keeper), asynchronous “visit my world” postcards with no free chat |
+| Short-session rewards | 8-12 minute satisfying loops | Every session ends with guaranteed reward + one “tomorrow hook”; streaks reward cosmetics, never power |
+
+---
+
+### 3) Moat matrix (v4)
+
+| Moat | Why it matters | Execution implications |
+|---|---|---|
+| Safety-trust moat | Parents choose trusted products repeatedly | COPPA-by-design, no open chat by default, strong parent controls, transparent data practices |
+| Kid-first fantasy content engine | Competitors can clone blocks, not world-feel cadence | Weekly “tiny wonder” drops, monthly themed realms, narrative arcs tied to creations |
+| Creation-to-story loop moat | Most apps separate building from pretend play | Every build can become a quest scene automatically (spawn NPC prompts, mini objectives) |
+| Reliability moat (save/perf/offline) | Parents churn fast on crashes/data loss | Crash-resistant autosave, offline play, low-end device targets, instant resume |
+| Monetization trust moat | IAP friction is top churn driver in kid apps | Clear “free forever core,” cosmetic-only paid content, no manipulative timers |
+| Family graph moat | Household-level retention beats single-user retention | Shared family hub, sibling-safe profiles, parent co-play prompts, printable/off-screen extensions |
+
+---
+
+### 4) Retrospective: why “Minecraft-lite” versions miss fantasy, and v4 fix
+
+| Common miss in prior versions | v4 correction |
+|---|---|
+| Too much “sandbox utility,” not enough magical story payoff | Tie every build to a living fantasy consequence (new character, event, or quest) |
+| Tutorial-heavy starts kill wonder | Start with instant playful scene + optional guided hints |
+| Monetization interrupts imagination | Keep core fantasy loop uninterrupted; monetize only optional cosmetics/expansions |
+| Social is either unsafe or absent | Use safe async sharing + parent-approved friend graph |
+| Progress feels flat (“just more blocks”) | Add age-fit mastery tracks and seasonal “world chapters” |
+| Creation isn’t celebrated | Build museum, weekly showcase, kid-friendly recap reel at session end |
+
+**Bottom line:** v4 wins if it feels like **“my magical world I can shape safely in 10 minutes”** rather than a smaller Minecraft clone.
