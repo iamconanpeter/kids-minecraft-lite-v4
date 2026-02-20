@@ -58,5 +58,5 @@
   - Acceptance: `docs/codex-coding-output.txt`
 - [x] `docs/release-summary.md`
   - Acceptance: includes codex snippets + test output + “Why this feels like Minecraft for kids”.
-- [ ] Git init/commit/push to `iamconanpeter/kids-minecraft-lite-v4`
+- [x] Git init/commit/push to `iamconanpeter/kids-minecraft-lite-v4`
   - Acceptance: remote contains final commit hash.

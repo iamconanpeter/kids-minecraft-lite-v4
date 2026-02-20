@@ -1,6 +1,8 @@
 # Release Summary — Kids Minecraft Lite v4
 
 Date: 2026-02-20
+Repo: https://github.com/iamconanpeter/kids-minecraft-lite-v4
+Commit: `1724eb4` (superseded if later docs-only commit is added)
 
 ## Scope delivered
 
