@@ -1,76 +1,34 @@
-# Fantasy Gap Analysis — v3 -> v4
+# Fantasy Gap Analysis — Why v3 Missed and How v4 Corrects It
 
-## Executive summary
+## Retrospective: why prior versions underperformed expectation
 
-Conan’s pivot is correct: v3 was technically competent but emotionally off-target for “kid Minecraft-like fantasy.”
+The previous iteration delivered cleaner UI but did not deliver the emotional fantasy kids expect from a Minecraft-like loop.
 
-v4 corrects this by making the expected fantasy pillars the center of the product:
-- day/night urgency
-- mine/place world interaction
-- tiny crafting with survival consequence
-- friendly vs danger mob archetypes
-- shelter-before-night pressure
-
----
-
-## Why v3 felt wrong
-
-| Expected fantasy signal | v3 reality | Gap impact |
+| Expectation from kids (6–7) | Where v3 fell short | v4 correction |
 |---|---|---|
-| “Night is coming, build now!” | Mission structure without strong day/night survival pressure | Low urgency and weak identity |
-| “Mine and place to survive” | Build interactions mostly puzzle-oriented | Building felt abstract, less adventure feel |
-| “Craft useful things fast” | Crafting not tightly linked to immediate danger mitigation | Reduced cause-effect satisfaction |
-| “Cute friend and scary enemy” | Buddy flavor existed; danger archetypes not strongly contrasted | Emotional arc flattened |
-| “My shelter protects me” | Shelter mechanics not central to survival loop | Kids cannot feel meaningful safety progression |
+| "Night is scary, I need to prepare" | Weak survival pressure and no strong dusk-to-night urgency | Short deterministic day/dusk/night cycle + visible warning + night danger |
+| "Mining and building keep me safe" | Mine/place existed but was not tied tightly to safety outcome | Shelter score directly reduces night damage and danger pressure |
+| "Crafting gives immediate power" | Crafting felt abstract and detached from moment-to-moment stakes | 4 tiny recipes, each with immediate effect (torch, planks, stone, pickaxe) |
+| "There is a nice friend and scary enemy" | Mob roles lacked clear contrast and cadence | Glowmew helper (day gifts), Boom Sprout chaser (night), Sky Wyrm periodic boss event |
+| "I can recover and try again" | Failure did not support strong tension-release loop | Forgiving rescue reset and fast retry while preserving progression |
+| "This is my world" | Session arc felt mission-like, less sandbox ownership | Always-on mine/place loop with local save and persistent world state |
 
-Retrospective verdict:
-- v3 optimized UX first.
-- v4 must optimize **fantasy loop first**, then UX support.
+## v4 fantasy fidelity criteria
 
----
+A first-time player should be able to answer **yes** to at least 4/5:
+1. I felt pressure to build before dark.
+2. Mining and crafting helped me survive.
+3. I met one friendly and one scary night archetype.
+4. My shelter score changed my survival odds.
+5. Sunrise felt rewarding and made me want one more loop.
 
-## v4 fantasy fidelity model
+## IP-safe fantasy mapping
 
-### Pillar requirements
-1. **Day/night cycle with visible pressure**
-2. **Mine/place loop always available**
-3. **3–5 craft recipes with immediate payoffs**
-4. **3 archetype mobs**: helper, chaser, boss-event
-5. **Shelter score affects night safety directly**
+| Familiar fantasy category | v4 original implementation |
+|---|---|
+| Friendly companion | **Glowmew** |
+| Night chaser threat | **Boom Sprout** |
+| Special boss night event | **Sky Wyrm** |
+| Light-for-safety craft | **Torch** crafted from plank + crystal |
 
-### Session arc target (3–8 minutes)
-- Minute 0–2: gather and place starter shelter blocks
-- Minute 2–4: dusk warning + emergency crafting
-- Minute 4–6: survive night/chaser pressure
-- Minute 6–8: sunrise stars, unlock, repeat
-
----
-
-## Legal-safe fantasy mapping (expectation -> original implementation)
-
-This mapping is required for legal-safe delivery.
-
-| Market fantasy expectation | Original v4 implementation (ship-safe) | Notes |
-|---|---|---|
-| Green exploding stalker-like enemy | **Boom Sprout** (night chaser) | Original silhouette, original VFX timing |
-| Tall shadow stalker-like fear archetype | **Gloom Stalker** behavior cues in night phase (non-branded) | Behavior archetype only, no copied look/lore |
-| Sky dragon boss-like event | **Sky Wyrm** (periodic boss event) | Original art/name/attack rhythm |
-| Friendly companion mob | **Glowmew** (helper pet) | Gift loop and emotional anchor |
-| Torch/light safety fantasy | **Lantern Totem** crafted light block | Distinct naming and visual style |
-
-Compliance rules:
-- No trademarked names, logos, textures, sounds, or lore.
-- Archetype inspiration allowed; implementation must remain original in naming/art/animation.
-
----
-
-## Acceptance signal for “now feels right”
-
-v4 should be judged successful when first-time kids can answer “yes” to:
-1. “Did I need to build before dark?”
-2. “Did mining and crafting help me survive?”
-3. “Was there a nice creature and a scary night creature?”
-4. “Did my shelter actually make me safer?”
-5. “Did I feel like I was in a block-world adventure?”
-
-If 4/5+ are true in playtest, fantasy gap is considered closed for MVP.
+All names, behavior labels, and UI cues are original and avoid trademarked names/assets.

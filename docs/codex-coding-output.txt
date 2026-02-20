@@ -1,207 +1,234 @@
-Use a deterministic, reducer-style core with thin Android adapters.
+No listed session skill applies here, so this is a direct implementation blueprint.
 
-**Architecture Shape**
-1. `engine-core` (pure Kotlin, test-first): state, rules, tick reducer, crafting, mob AI, scoring.
-2. `engine-android` (platform): `GameView : View`, input mapping, frame loop (`Choreographer`), persistence via `SharedPreferences`.
-3. `engine-content` (constants): recipes, mob templates, biome tuning.
+**1) Project shape (pure engine + Android View)**
+- `:engine` (pure Kotlin, no Android imports)
+- `:app` (Android Activity, custom `View`, input/render loop, save adapter)
+
+Use this direction:
+- `GameEngine` owns deterministic state + systems.
+- `GameView` only renders `RenderSnapshot` and sends `GameIntent`.
+- `MainActivity` wires loop + persistence lifecycle.
 
 ```kotlin
-// Core loop contract
-interface EngineReducer {
-    fun reduce(state: GameState, event: GameEvent, rng: Rng): GameState
+// engine/core/GameEngine.kt
+class GameEngine(
+    private val world: WorldState,
+    private val dayNight: DayNightCycle,
+    private val interaction: InteractionSystem,
+    private val crafting: CraftingSystem,
+    private val mobSystem: MobSystem,
+    private val shelterEval: ShelterSafetyEvaluator,
+    private val progression: ProgressionSystem
+) {
+    fun tick(deltaSec: Float, intents: List<GameIntent>): EngineFrameResult { /* ... */ TODO() }
 }
 ```
 
-### Data Model (Core)
+**2) Day/Night cycle**
 ```kotlin
-data class Vec2(val x: Int, val y: Int)
-
-enum class TileType { AIR, DIRT, WOOD, STONE, WATER, SHELTER_WALL, SHELTER_ROOF, TORCH }
-enum class TimePhase { DAY, DUSK, NIGHT, DAWN }
-enum class MobType { FRIENDLY_HELPER, NIGHT_CHASER, BOSS_GUARDIAN }
-enum class ItemType { WOOD, STONE, FIBER, TORCH, SWORD, SHIELD, GIFT_BUNDLE }
-
-data class Tile(val pos: Vec2, val type: TileType, val durability: Int = 0)
-data class Inventory(val items: Map<ItemType, Int>)
-data class PlayerState(val pos: Vec2, val health: Int, val energy: Int, val inventory: Inventory)
-
-data class MobState(
-    val id: String,
-    val type: MobType,
-    val pos: Vec2,
-    val health: Int,
-    val aggroTarget: String? = null,
-    val cooldownTicks: Int = 0
-)
+enum class DayPhase { DAWN, DAY, DUSK, NIGHT }
 
 data class DayNightState(
-    val tickInCycle: Int,
-    val phase: TimePhase,
-    val dayNumber: Int
+    val time01: Float,          // 0f..1f
+    val dayIndex: Int,
+    val phase: DayPhase,
+    val ambientLight: Float     // 0f..1f
 )
 
-data class WorldState(
-    val width: Int,
-    val height: Int,
-    val tiles: Map<Vec2, Tile>,
-    val mobs: List<MobState>,
-    val activeBossEvent: BossEventState?
-)
-
-data class BossEventState(val startedAtDay: Int, val rageLevel: Int, val bossMobId: String)
-
-data class GameState(
-    val player: PlayerState,
-    val world: WorldState,
-    val time: DayNightState,
-    val seed: Long
-)
+class DayNightCycle(private val secondsPerDay: Float = 300f) {
+    private var elapsed = 0f
+    fun tick(deltaSec: Float): DayNightState {
+        elapsed += deltaSec
+        val dayIndex = (elapsed / secondsPerDay).toInt()
+        val t = (elapsed % secondsPerDay) / secondsPerDay
+        val phase = when {
+            t < 0.20f -> DayPhase.DAWN
+            t < 0.55f -> DayPhase.DAY
+            t < 0.75f -> DayPhase.DUSK
+            else -> DayPhase.NIGHT
+        }
+        val light = when (phase) {
+            DayPhase.DAY -> 1f
+            DayPhase.NIGHT -> 0.2f
+            DayPhase.DAWN, DayPhase.DUSK -> 0.6f
+        }
+        return DayNightState(t, dayIndex, phase, light)
+    }
+}
 ```
 
-### Pure Function: Shelter Score
+**3) Mine/Place system**
 ```kotlin
-data class ShelterScore(val score: Int, val isSafeAtNight: Boolean, val reasons: List<String>)
+data class TilePos(val x: Int, val y: Int)
+enum class BlockType { AIR, DIRT, STONE, WOOD, TORCH, WALL, DOOR }
 
-fun computeShelterScore(tiles: Map<Vec2, Tile>, playerPos: Vec2): ShelterScore {
-    val near = tiles.filterKeys { manhattan(it, playerPos) <= 8 }.values
-    val walls = near.count { it.type == TileType.SHELTER_WALL }
-    val roofs = near.count { it.type == TileType.SHELTER_ROOF }
-    val torches = near.count { it.type == TileType.TORCH }
-    val openings = estimateOpenings(near) // e.g., flood-fill from outside
+sealed class MineResult { object Fail : MineResult(); data class Success(val drops: List<ItemStack>) : MineResult() }
+sealed class PlaceResult { object Fail : PlaceResult(); object Success : PlaceResult() }
 
-    val score = (walls * 4) + (roofs * 5) + (torches * 2) - (openings * 6)
-    val safe = score >= 30 && roofs >= 4 && openings <= 1
+class InteractionSystem(
+    private val maxReach: Int = 4,
+    private val dropTable: DropTable
+) {
+    fun mine(world: WorldState, player: PlayerState, target: TilePos): MineResult { /* rules + drops */ TODO() }
+    fun place(world: WorldState, player: PlayerState, target: TilePos, block: BlockType): PlaceResult { /* validate */ TODO() }
+}
+```
 
-    return ShelterScore(
-        score = score.coerceAtLeast(0),
-        isSafeAtNight = safe,
-        reasons = buildList {
-            if (roofs < 4) add("Need more roof coverage")
-            if (openings > 1) add("Too many openings")
-            if (torches < 2) add("Add light sources")
-        }
+Rules for MVP:
+- Mine: in reach, not `AIR`, block hardness <= tool tier.
+- Place: in reach, target is `AIR`, player inventory has block item, cannot trap player in solid tile.
+
+**4) Crafting (3-5 recipes)**
+```kotlin
+enum class ItemId { LOG, PLANK, STICK, COAL, WOOD_PICKAXE, TORCH, WOOL, BED }
+
+data class ItemStack(val item: ItemId, val count: Int)
+data class Recipe(
+    val id: String,
+    val inputs: Map<ItemId, Int>,
+    val outputs: List<ItemStack>,
+    val unlockLevel: Int = 1
+)
+
+object StarterRecipes {
+    val all = listOf(
+        Recipe("planks", mapOf(ItemId.LOG to 1), listOf(ItemStack(ItemId.PLANK, 4))),
+        Recipe("sticks", mapOf(ItemId.PLANK to 2), listOf(ItemStack(ItemId.STICK, 4))),
+        Recipe("wood_pickaxe", mapOf(ItemId.PLANK to 3, ItemId.STICK to 2), listOf(ItemStack(ItemId.WOOD_PICKAXE, 1))),
+        Recipe("torch", mapOf(ItemId.COAL to 1, ItemId.STICK to 1), listOf(ItemStack(ItemId.TORCH, 4))),
+        Recipe("bed", mapOf(ItemId.WOOL to 3, ItemId.PLANK to 3), listOf(ItemStack(ItemId.BED, 1)), unlockLevel = 2)
     )
 }
-```
 
-### Pure Function: Day-Night Tick State Machine
-```kotlin
-const val CYCLE_TICKS = 2400
-const val DAY_END = 1200
-const val DUSK_END = 1500
-const val NIGHT_END = 2100
-
-fun tickDayNight(prev: DayNightState, deltaTicks: Int): DayNightState {
-    val raw = prev.tickInCycle + deltaTicks
-    val nextDay = prev.dayNumber + (raw / CYCLE_TICKS)
-    val nextTick = raw % CYCLE_TICKS
-
-    val nextPhase = when {
-        nextTick < DAY_END -> TimePhase.DAY
-        nextTick < DUSK_END -> TimePhase.DUSK
-        nextTick < NIGHT_END -> TimePhase.NIGHT
-        else -> TimePhase.DAWN
-    }
-
-    return prev.copy(tickInCycle = nextTick, phase = nextPhase, dayNumber = nextDay)
+class CraftingSystem(private val recipes: List<Recipe>) {
+    fun craft(recipeId: String, inv: Inventory, progression: ProgressionState): Boolean { /* consume/add */ TODO() }
 }
 ```
 
-### Pure Function: Crafting Validation
+**5) Mob archetypes (friendly/chaser/boss-event)**
 ```kotlin
-data class Recipe(val output: ItemType, val count: Int, val inputs: Map<ItemType, Int>, val station: String? = null)
-sealed interface CraftResult {
-    data class Ok(val newInventory: Inventory) : CraftResult
-    data class Error(val reason: String) : CraftResult
-}
+enum class MobType { BUTTERFLY, SLIME, NIGHT_TITAN }
 
-fun validateAndCraft(inv: Inventory, recipe: Recipe, stationAvailable: Boolean): CraftResult {
-    if (recipe.station != null && !stationAvailable) return CraftResult.Error("Missing station: ${recipe.station}")
-
-    for ((item, needed) in recipe.inputs) {
-        val have = inv.items[item] ?: 0
-        if (have < needed) return CraftResult.Error("Need $needed $item, have $have")
-    }
-
-    val updated = inv.items.toMutableMap()
-    recipe.inputs.forEach { (item, needed) -> updated[item] = (updated[item] ?: 0) - needed }
-    updated[recipe.output] = (updated[recipe.output] ?: 0) + recipe.count
-
-    return CraftResult.Ok(Inventory(updated.filterValues { it > 0 }))
-}
-```
-
-### Mob Behaviors (Pure Decision Layer)
-```kotlin
-sealed interface MobIntent {
-    data class MoveToward(val target: Vec2) : MobIntent
-    data class Attack(val targetId: String) : MobIntent
-    data class GiveGift(val targetId: String, val item: ItemType) : MobIntent
-    data object Roam : MobIntent
-    data object SpawnBossWave : MobIntent
-}
-
-fun decideFriendlyGift(mob: MobState, state: GameState, rng: Rng): MobIntent {
-    val player = state.player
-    val nearby = manhattan(mob.pos, player.pos) <= 3
-    val lowResources = (player.inventory.items[ItemType.WOOD] ?: 0) < 5
-    return if (nearby && lowResources && mob.cooldownTicks == 0 && rng.nextInt(100) < 25)
-        MobIntent.GiveGift("player", ItemType.GIFT_BUNDLE)
-    else MobIntent.Roam
-}
-
-fun decideNightChaser(mob: MobState, state: GameState): MobIntent {
-    if (state.time.phase != TimePhase.NIGHT) return MobIntent.Roam
-    val player = state.player
-    return if (manhattan(mob.pos, player.pos) <= 1) MobIntent.Attack("player")
-    else MobIntent.MoveToward(player.pos)
-}
-
-fun maybeTriggerBossEvent(state: GameState, shelter: ShelterScore): MobIntent? {
-    val isBossNight = state.time.phase == TimePhase.NIGHT && state.time.dayNumber % 3 == 0
-    val underPrepared = !shelter.isSafeAtNight
-    val noActive = state.world.activeBossEvent == null
-    return if (isBossNight && underPrepared && noActive) MobIntent.SpawnBossWave else null
-}
-```
-
-### SharedPreferences Save Snapshot Strategy
-Use one JSON blob + schema version + checksum/timestamp.
-
-```kotlin
-@Serializable
-data class SaveSnapshotV1(
-    val schemaVersion: Int = 1,
-    val savedAtEpochMs: Long,
-    val game: GameStateDto // DTO, not domain object directly
+data class MobState(
+    val id: Long,
+    val type: MobType,
+    var hp: Int,
+    var pos: Vec2,
+    var target: Vec2? = null
 )
 
-class SaveStore(context: Context) {
-    private val prefs = context.getSharedPreferences("blockquest_save", Context.MODE_PRIVATE)
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+interface MobBrain {
+    fun tick(ctx: MobContext, mob: MobState): MobCommand
+}
 
-    fun save(state: GameState) {
-        val dto = state.toDto()
-        val snap = SaveSnapshotV1(savedAtEpochMs = System.currentTimeMillis(), game = dto)
-        val payload = json.encodeToString(snap)
-        prefs.edit()
-            .putString("snapshot_json", payload)
-            .putInt("snapshot_version", 1)
-            .apply() // async; use commit() for critical checkpoints
-    }
+class FriendlyBrain : MobBrain { override fun tick(ctx: MobContext, mob: MobState) = MobCommand.Wander }
+class ChaserBrain : MobBrain { override fun tick(ctx: MobContext, mob: MobState) = MobCommand.ChasePlayer }
+class BossEventBrain : MobBrain { override fun tick(ctx: MobContext, mob: MobState) = MobCommand.BossPattern }
 
-    fun loadOrNull(): GameState? {
-        val raw = prefs.getString("snapshot_json", null) ?: return null
-        return runCatching {
-            val snap = json.decodeFromString<SaveSnapshotV1>(raw)
-            migrateIfNeeded(snap).game.toDomain()
-        }.getOrNull()
+class MobSystem(
+    private val brains: Map<MobType, MobBrain>,
+    private val rng: RandomSource
+) {
+    fun update(ctx: MobContext) { /* spawn + ai + despawn */ }
+}
+```
+
+Spawn policy:
+- Friendly: day-biased, near grass.
+- Chaser: dusk/night, outside shelter radius.
+- Boss event: once every N nights or progression trigger (`level >= 3 && dayPhase == NIGHT`).
+
+**6) Shelter safety score**
+```kotlin
+enum class SafetyBand { DANGER, RISKY, SAFE }
+
+data class ShelterSafetyScore(
+    val total: Int,          // 0..100
+    val roofCoverage: Int,
+    val enclosure: Int,
+    val light: Int,
+    val doorBonus: Int,
+    val band: SafetyBand
+)
+
+class ShelterSafetyEvaluator {
+    fun evaluate(world: WorldState, playerTile: TilePos, phase: DayPhase): ShelterSafetyScore {
+        // sample weighting: roof 35, enclosure 35, light 20, door 10
+        TODO()
     }
 }
 ```
 
-Key rules:
-1. Keep domain pure; serialize DTOs only.
-2. Include `schemaVersion` for migrations.
-3. Save on lifecycle events (`onPause`) and periodic checkpoints (every N ticks).
-4. For larger saves later, move to DataStore/Room, keep same DTO versioning model.
+Use score effects:
+- `SAFE (>=70)`: no chaser spawn in 8-tile radius.
+- `RISKY (40..69)`: normal spawn.
+- `DANGER (<40)`: increased night spawn chance.
+
+**7) Progression + local save**
+```kotlin
+@kotlinx.serialization.Serializable
+data class ProgressionState(
+    val level: Int = 1,
+    val xp: Int = 0,
+    val nightsSurvived: Int = 0,
+    val bossesDefeated: Int = 0,
+    val unlockedRecipeIds: Set<String> = setOf("planks", "sticks")
+)
+
+@kotlinx.serialization.Serializable
+data class GameSave(
+    val world: WorldStateSnapshot,
+    val player: PlayerSnapshot,
+    val progression: ProgressionState,
+    val dayNight: DayNightSnapshot,
+    val version: Int = 1
+)
+
+interface SaveRepository {
+    suspend fun save(slot: Int, data: GameSave)
+    suspend fun load(slot: Int): GameSave?
+}
+
+class ProgressionSystem {
+    fun onMineBlock(state: ProgressionState): ProgressionState = TODO()
+    fun onCraft(state: ProgressionState, recipeId: String): ProgressionState = TODO()
+    fun onNightEnd(state: ProgressionState): ProgressionState = TODO()
+}
+```
+
+Android adapter:
+- `FileSaveRepository(context.filesDir)` with `kotlinx.serialization.json.Json`.
+- Autosave every 20-30s and on `onPause`.
+
+**8) Custom View wiring (MVP loop)**
+```kotlin
+class GameView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
+    var latest: RenderSnapshot = RenderSnapshot.EMPTY
+    private val intents = ArrayDeque<GameIntent>()
+
+    fun consumeIntents(): List<GameIntent> = buildList { while (intents.isNotEmpty()) add(intents.removeFirst()) }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean { /* map gesture -> intent */ return true }
+    override fun onDraw(canvas: Canvas) { /* draw tiles + mobs + hud */ }
+}
+```
+
+`MainActivity`:
+- fixed timestep update (e.g. 20 TPS) + render each frame.
+- call `engine.tick(dt, gameView.consumeIntents())`.
+- assign returned snapshot to view and `invalidate()`.
+
+**9) Unit-test strategy (engine-only, fast)**
+- `world`: mine/place bounds, reach checks, solid collision, drop correctness.
+- `crafting`: valid craft, insufficient inputs, locked recipe, repeated craft.
+- `mob`: friendly never emits attack command, chaser acquires player target, boss spawns only when trigger met.
+- `dayNight`: phase boundaries and wrap from end-of-day to dawn.
+- `shelter`: score thresholds and spawn modifier mapping.
+
+Test setup recommendations:
+- deterministic `RandomSource(seed=123)`.
+- tiny fixture maps (`16x16`) with builder helpers.
+- table-driven tests for recipe and shelter cases.
+- keep all logic tests in `:engine` with JUnit; no Android instrumentation needed for these systems.
+
+If you want, I can convert this into an actual starter folder structure with compile-ready Kotlin files next.

@@ -2,101 +2,107 @@ package com.iamconanpeter.kidsminecraftlite
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BlockQuestLiteEngineTest {
 
     @Test
-    fun dayNightCycleTransitionsDeterministically() {
+    fun dayNightCycleTransitionsAndResets() {
         val engine = BlockQuestLiteEngine()
-        repeat(BlockQuestLiteEngine.DAY_TICKS) { engine.tick() }
+        val firstDay = engine.currentState().dayNumber
 
-        assertEquals(BlockQuestLiteEngine.DayPhase.NIGHT, engine.phase)
-        assertEquals(1, engine.nightsSurvived)
+        repeat(82) { engine.tick() }
+        assertEquals(BlockQuestLitePhase.DUSK, engine.currentState().phase)
 
-        repeat(BlockQuestLiteEngine.NIGHT_TICKS) { engine.tick() }
+        repeat(20) { engine.tick() }
+        assertEquals(BlockQuestLitePhase.NIGHT, engine.currentState().phase)
 
-        assertEquals(BlockQuestLiteEngine.DayPhase.DAY, engine.phase)
-        assertTrue(engine.stars >= 1)
+        repeat(60) { engine.tick() }
+        assertEquals(BlockQuestLitePhase.DAWN, engine.currentState().phase)
+
+        repeat(20) { engine.tick() }
+        assertEquals(BlockQuestLitePhase.DAY, engine.currentState().phase)
+        assertEquals(firstDay + 1, engine.currentState().dayNumber)
     }
 
     @Test
     fun mineAndPlaceLoopChangesInventoryAndWorld() {
         val engine = BlockQuestLiteEngine()
-        val before = engine.snapshot().inventory[BlockQuestLiteEngine.ItemType.DIRT] ?: 0
+        val beforeWood = engine.getInventory(BlockQuestLiteItem.WOOD)
 
-        engine.setMode(BlockQuestLiteEngine.InputMode.PLACE)
-        assertTrue(engine.placeTile(0, 0))
+        val mined = engine.mineBlock(1, BlockQuestLiteEngine.HEIGHT - 4)
+        assertTrue(mined)
+        assertEquals(beforeWood + 1, engine.getInventory(BlockQuestLiteItem.WOOD))
 
-        val afterPlace = engine.snapshot().inventory[BlockQuestLiteEngine.ItemType.DIRT] ?: 0
-        assertEquals(before - 1, afterPlace)
+        engine.toggleMode() // place mode
+        val targetX = 2
+        val targetY = 2
 
-        engine.setMode(BlockQuestLiteEngine.InputMode.MINE)
-        assertTrue(engine.mineTile(0, 0))
-
-        val afterMine = engine.snapshot().inventory[BlockQuestLiteEngine.ItemType.DIRT] ?: 0
-        assertTrue(afterMine >= afterPlace)
-        assertEquals(BlockQuestLiteEngine.BlockType.AIR, engine.blockAt(0, 0))
-    }
-
-    @Test
-    fun craftingValidatesCostsAndCanUnlockPickaxe() {
-        val engine = BlockQuestLiteEngine()
-
-        assertFalse(engine.craft("stone_pick")) // starts with only 1 stone
-
-        assertTrue(engine.mineTile(0, 6)) // stone row
-        assertTrue(engine.craft("stone_pick"))
-        assertTrue(engine.hasPickaxe)
-    }
-
-    @Test
-    fun shelterScoreIncreasesWhenEnclosed() {
-        val engine = BlockQuestLiteEngine()
-        engine.setMode(BlockQuestLiteEngine.InputMode.PLACE)
-
-        assertTrue(engine.placeTile(1, 4))
-        assertTrue(engine.placeTile(3, 4))
-        assertTrue(engine.placeTile(2, 3))
-        assertTrue(engine.placeTile(1, 3))
-
-        assertTrue(engine.shelterScore() >= BlockQuestLiteEngine.SHELTER_SAFE_THRESHOLD)
-        assertTrue(engine.isSheltered())
-    }
-
-    @Test
-    fun nightChaserDamagesWhenUnsheltered() {
-        val engine = BlockQuestLiteEngine()
-        val startingHearts = engine.hearts
-
-        repeat(BlockQuestLiteEngine.DAY_TICKS) { engine.tick() } // enter night
-        repeat(21) { engine.tick() } // enough for first chaser contact, before dawn heal
-
-        assertTrue(engine.hearts < startingHearts || engine.rescueCount > 0)
-    }
-
-    @Test
-    fun thirdNightTriggersBossEvent() {
-        val engine = BlockQuestLiteEngine()
-        var guard = 0
-
-        while (engine.nightsSurvived < 3 && guard < 1000) {
-            engine.tick()
-            guard++
+        // cycle until wood is selected
+        repeat(10) {
+            if (engine.currentPlaceItem() != BlockQuestLiteItem.WOOD) {
+                engine.cyclePlaceItem()
+            }
         }
 
-        assertEquals(3, engine.nightsSurvived)
-        assertTrue(engine.snapshot().bossActive)
+        val placed = engine.placeBlock(targetX, targetY)
+        assertTrue(placed)
+        assertEquals(BlockQuestLiteBlock.WOOD, engine.getBlock(targetX, targetY))
     }
 
     @Test
-    fun craftingBeforeSunriseAddsExtraStarReward() {
+    fun craftingConsumesInputsAndProducesOutput() {
         val engine = BlockQuestLiteEngine()
-        assertTrue(engine.craft("plank_bundle"))
+        engine.debugGrant(BlockQuestLiteItem.WOOD, 4)
 
-        repeat(BlockQuestLiteEngine.DAY_TICKS + BlockQuestLiteEngine.NIGHT_TICKS) { engine.tick() }
+        val crafted = engine.craft("plank_bundle")
+        assertTrue(crafted)
+        assertTrue(engine.getInventory(BlockQuestLiteItem.PLANK) >= 2)
 
-        assertTrue(engine.stars >= 2)
+        val failCraft = engine.craft("pickaxe")
+        assertFalse(failCraft) // no enough stone yet (or stars)
+    }
+
+    @Test
+    fun nightPressureAndBossEventAffectState() {
+        val engine = BlockQuestLiteEngine()
+        val initialHearts = engine.currentState().hearts
+
+        repeat(520) { engine.tick() }
+        val after = engine.currentState()
+
+        assertTrue(after.skyWyrmEvents >= 1)
+        assertTrue(after.boomSproutThreat >= 1)
+        assertTrue(after.hearts <= initialHearts)
+    }
+
+    @Test
+    fun shelterScoreImprovesWithEnclosureAndSaveRoundTripWorks() {
+        val engine = BlockQuestLiteEngine()
+        val before = engine.currentState().shelterScore
+
+        val ax = BlockQuestLiteEngine.WIDTH / 2
+        val ay = 2
+        engine.debugGrant(BlockQuestLiteItem.WOOD, 10)
+        engine.toggleMode()
+        while (engine.currentPlaceItem() != BlockQuestLiteItem.WOOD) {
+            engine.cyclePlaceItem()
+        }
+
+        assertTrue(engine.placeBlock(ax - 1, ay))
+        assertTrue(engine.placeBlock(ax + 1, ay))
+        assertTrue(engine.placeBlock(ax, ay - 1))
+        assertTrue(engine.placeBlock(ax, ay + 1))
+
+        val after = engine.currentState().shelterScore
+        assertTrue(after > before)
+
+        val payload = engine.toSavePayload()
+        val restored = BlockQuestLiteEngine(payload)
+        assertEquals(engine.currentState().dayNumber, restored.currentState().dayNumber)
+        assertEquals(engine.currentState().shelterScore, restored.currentState().shelterScore)
+        assertNotEquals("", payload)
     }
 }

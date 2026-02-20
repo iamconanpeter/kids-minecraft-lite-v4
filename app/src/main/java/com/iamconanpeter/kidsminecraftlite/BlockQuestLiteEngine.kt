@@ -1,585 +1,627 @@
 package com.iamconanpeter.kidsminecraftlite
 
-class BlockQuestLiteEngine(snapshot: SaveSnapshot? = null) {
+import kotlin.math.max
+import kotlin.math.min
 
-    enum class BlockType {
-        AIR,
-        DIRT,
-        WOOD,
-        STONE,
-        PLANK,
-        TORCH,
-        CRYSTAL
-    }
+enum class BlockQuestLiteBlock {
+    AIR,
+    DIRT,
+    WOOD,
+    STONE,
+    PLANK,
+    TORCH,
+    CRYSTAL
+}
 
-    enum class ItemType {
-        DIRT,
-        WOOD,
-        STONE,
-        PLANK,
-        TORCH,
-        CRYSTAL,
-        PICKAXE
-    }
+enum class BlockQuestLiteItem {
+    DIRT,
+    WOOD,
+    STONE,
+    PLANK,
+    TORCH,
+    CRYSTAL,
+    PICKAXE
+}
 
-    enum class DayPhase {
-        DAY,
-        NIGHT
-    }
+enum class BlockQuestLiteInputMode {
+    MINE,
+    PLACE
+}
 
-    enum class InputMode {
-        MINE,
-        PLACE
-    }
+enum class BlockQuestLitePhase {
+    DAY,
+    DUSK,
+    NIGHT,
+    DAWN
+}
 
-    enum class MobMood {
-        HELPFUL,
-        HUNTING,
-        RAGING,
-        CALM
-    }
+data class BlockQuestLiteRecipe(
+    val id: String,
+    val icon: String,
+    val inputs: Map<BlockQuestLiteItem, Int>,
+    val output: Pair<BlockQuestLiteItem, Int>,
+    val starsRequired: Int = 0
+)
 
-    data class Recipe(
-        val id: String,
-        val icon: String,
-        val inputs: Map<ItemType, Int>,
-        val output: ItemType,
-        val outputCount: Int
-    )
+data class BlockQuestLiteState(
+    val width: Int,
+    val height: Int,
+    val world: IntArray,
+    val inventory: Map<BlockQuestLiteItem, Int>,
+    val mode: BlockQuestLiteInputMode,
+    val selectedPlaceIndex: Int,
+    val hearts: Int,
+    val stars: Int,
+    val unlockTier: Int,
+    val dayNumber: Int,
+    val cycleTick: Int,
+    val phase: BlockQuestLitePhase,
+    val easyMode: Boolean,
+    val shelterScore: Int,
+    val craftedThisCycle: Boolean,
+    val bossEventActive: Boolean,
+    val nightsSurvived: Int,
+    val boomSproutThreat: Int,
+    val glowmewGiftMoments: Int,
+    val skyWyrmEvents: Int,
+    val rescuedCount: Int,
+    val statusMessage: String
+)
 
-    data class SaveSnapshot(
-        val world: String,
-        val inventory: String,
-        val stars: Int,
-        val hearts: Int,
-        val cycleTick: Int,
-        val nightsSurvived: Int,
-        val craftedSinceSunrise: Boolean,
-        val easyMode: Boolean,
-        val hasPickaxe: Boolean,
-        val selectedItem: String,
-        val inputMode: String,
-        val bossActive: Boolean,
-        val bossHp: Int,
-        val bossTicksLeft: Int,
-        val chaserDistance: Int,
-        val rescueCount: Int
-    )
+class BlockQuestLiteEngine(savedPayload: String? = null) {
+    companion object {
+        const val WIDTH = 10
+        const val HEIGHT = 8
 
-    data class GameSnapshot(
-        val width: Int,
-        val height: Int,
-        val world: List<BlockType>,
-        val phase: DayPhase,
-        val cycleTick: Int,
-        val cycleLength: Int,
-        val stars: Int,
-        val hearts: Int,
-        val maxHearts: Int,
-        val shelterScore: Int,
-        val sheltered: Boolean,
-        val inventory: Map<ItemType, Int>,
-        val selectedPlaceable: ItemType,
-        val unlockedPlaceables: List<ItemType>,
-        val mode: InputMode,
-        val easyMode: Boolean,
-        val nightsSurvived: Int,
-        val friendlyMood: MobMood,
-        val chaserMood: MobMood,
-        val bossMood: MobMood,
-        val chaserDistance: Int,
-        val bossActive: Boolean,
-        val bossHp: Int,
-        val bossHpMax: Int,
-        val lastEvent: String
-    )
+        private const val DAY_TICKS = 80
+        private const val DUSK_TICKS = 20
+        private const val NIGHT_TICKS = 60
+        private const val DAWN_TICKS = 20
+        private const val CYCLE_TICKS = DAY_TICKS + DUSK_TICKS + NIGHT_TICKS + DAWN_TICKS
 
-    private val world = MutableList(WORLD_WIDTH * WORLD_HEIGHT) { BlockType.AIR }
-    private val inventory = mutableMapOf<ItemType, Int>()
+        private const val MAX_HEARTS = 5
 
-    var mode: InputMode = InputMode.MINE
-        private set
-    var easyMode: Boolean = false
-        private set
-    var selectedPlaceable: ItemType = ItemType.DIRT
-        private set
-
-    var stars: Int = 0
-        private set
-    var hearts: Int = MAX_HEARTS
-        private set
-    var cycleTick: Int = 0
-        private set
-    var phase: DayPhase = DayPhase.DAY
-        private set
-    var nightsSurvived: Int = 0
-        private set
-    var rescueCount: Int = 0
-        private set
-
-    var craftedSinceSunrise: Boolean = false
-        private set
-    var hasPickaxe: Boolean = false
-        private set
-
-    private var petGiftCooldown = 8
-    private var chaserDistance = CHASER_START_DISTANCE
-    private var chaserStepClock = 0
-
-    private var bossActive = false
-    private var bossHp = 0
-    private var bossTicksLeft = 0
-
-    private var lastEvent = "🌤️ Build your shelter!"
-
-    val recipes: List<Recipe> = listOf(
-        Recipe(
-            id = "plank_bundle",
-            icon = "🪵→🧱",
-            inputs = mapOf(ItemType.WOOD to 2),
-            output = ItemType.PLANK,
-            outputCount = 2
-        ),
-        Recipe(
-            id = "stone_pick",
-            icon = "⛏️",
-            inputs = mapOf(ItemType.STONE to 2, ItemType.WOOD to 1),
-            output = ItemType.PICKAXE,
-            outputCount = 1
-        ),
-        Recipe(
-            id = "torch_pair",
-            icon = "🔥x2",
-            inputs = mapOf(ItemType.PLANK to 1, ItemType.CRYSTAL to 1),
-            output = ItemType.TORCH,
-            outputCount = 2
-        ),
-        Recipe(
-            id = "mud_brick",
-            icon = "🟫→🪨",
-            inputs = mapOf(ItemType.DIRT to 2, ItemType.WOOD to 1),
-            output = ItemType.STONE,
-            outputCount = 1
+        private val PLACEABLE_ITEMS = listOf(
+            BlockQuestLiteItem.DIRT,
+            BlockQuestLiteItem.WOOD,
+            BlockQuestLiteItem.STONE,
+            BlockQuestLiteItem.PLANK,
+            BlockQuestLiteItem.TORCH
         )
-    )
+
+        val RECIPES: List<BlockQuestLiteRecipe> = listOf(
+            BlockQuestLiteRecipe(
+                id = "plank_bundle",
+                icon = "🪵→🟫",
+                inputs = mapOf(BlockQuestLiteItem.WOOD to 2),
+                output = BlockQuestLiteItem.PLANK to 2
+            ),
+            BlockQuestLiteRecipe(
+                id = "torch_pair",
+                icon = "🟫+💎→🔥",
+                inputs = mapOf(
+                    BlockQuestLiteItem.PLANK to 1,
+                    BlockQuestLiteItem.CRYSTAL to 1
+                ),
+                output = BlockQuestLiteItem.TORCH to 2
+            ),
+            BlockQuestLiteRecipe(
+                id = "stone_press",
+                icon = "🟫+🪨→⛰️",
+                inputs = mapOf(
+                    BlockQuestLiteItem.DIRT to 2,
+                    BlockQuestLiteItem.WOOD to 1
+                ),
+                output = BlockQuestLiteItem.STONE to 1
+            ),
+            BlockQuestLiteRecipe(
+                id = "pickaxe",
+                icon = "⛰️+🪵→⛏️",
+                inputs = mapOf(
+                    BlockQuestLiteItem.STONE to 2,
+                    BlockQuestLiteItem.WOOD to 1
+                ),
+                output = BlockQuestLiteItem.PICKAXE to 1,
+                starsRequired = 1
+            )
+        )
+
+        fun phaseForTick(cycleTick: Int): BlockQuestLitePhase {
+            return when {
+                cycleTick < DAY_TICKS -> BlockQuestLitePhase.DAY
+                cycleTick < DAY_TICKS + DUSK_TICKS -> BlockQuestLitePhase.DUSK
+                cycleTick < DAY_TICKS + DUSK_TICKS + NIGHT_TICKS -> BlockQuestLitePhase.NIGHT
+                else -> BlockQuestLitePhase.DAWN
+            }
+        }
+
+        private fun toItem(block: BlockQuestLiteBlock): BlockQuestLiteItem? {
+            return when (block) {
+                BlockQuestLiteBlock.DIRT -> BlockQuestLiteItem.DIRT
+                BlockQuestLiteBlock.WOOD -> BlockQuestLiteItem.WOOD
+                BlockQuestLiteBlock.STONE -> BlockQuestLiteItem.STONE
+                BlockQuestLiteBlock.PLANK -> BlockQuestLiteItem.PLANK
+                BlockQuestLiteBlock.TORCH -> BlockQuestLiteItem.TORCH
+                BlockQuestLiteBlock.CRYSTAL -> BlockQuestLiteItem.CRYSTAL
+                BlockQuestLiteBlock.AIR -> null
+            }
+        }
+
+        private fun toBlock(item: BlockQuestLiteItem): BlockQuestLiteBlock? {
+            return when (item) {
+                BlockQuestLiteItem.DIRT -> BlockQuestLiteBlock.DIRT
+                BlockQuestLiteItem.WOOD -> BlockQuestLiteBlock.WOOD
+                BlockQuestLiteItem.STONE -> BlockQuestLiteBlock.STONE
+                BlockQuestLiteItem.PLANK -> BlockQuestLiteBlock.PLANK
+                BlockQuestLiteItem.TORCH -> BlockQuestLiteBlock.TORCH
+                BlockQuestLiteItem.CRYSTAL,
+                BlockQuestLiteItem.PICKAXE -> null
+            }
+        }
+    }
+
+    private val world = IntArray(WIDTH * HEIGHT) { BlockQuestLiteBlock.AIR.ordinal }
+    private val inventory = mutableMapOf<BlockQuestLiteItem, Int>()
+
+    private var mode = BlockQuestLiteInputMode.MINE
+    private var selectedPlaceIndex = 0
+
+    private var hearts = MAX_HEARTS
+    private var stars = 0
+    private var unlockTier = 1
+
+    private var dayNumber = 1
+    private var cycleTick = 0
+    private var phase = BlockQuestLitePhase.DAY
+    private var easyMode = true
+
+    private var shelterScore = 0
+    private var craftedThisCycle = false
+    private var bossEventActive = false
+    private var bossRewardPending = false
+
+    private var nightsSurvived = 0
+    private var boomSproutThreat = 0
+    private var glowmewGiftMoments = 0
+    private var skyWyrmEvents = 0
+    private var rescuedCount = 0
+
+    private var giftCooldownTicks = 20
+    private var nightDamageCooldown = 10
+    private var statusMessage = "Tap blocks to mine!"
 
     init {
-        if (snapshot == null) {
-            seedWorld()
-            seedInventory()
-        } else {
-            restore(snapshot)
+        generateInitialWorld()
+        if (!savedPayload.isNullOrBlank()) {
+            if (!restore(savedPayload)) {
+                statusMessage = "New world ready!"
+            }
         }
-        enforceSelectedPlaceableUnlocked()
+        shelterScore = computeShelterScore()
     }
 
-    fun snapshot(): GameSnapshot = GameSnapshot(
-        width = WORLD_WIDTH,
-        height = WORLD_HEIGHT,
-        world = world.toList(),
-        phase = phase,
-        cycleTick = cycleTick,
-        cycleLength = CYCLE_TICKS,
-        stars = stars,
-        hearts = hearts,
-        maxHearts = MAX_HEARTS,
-        shelterScore = shelterScore(),
-        sheltered = isSheltered(),
-        inventory = inventory.toMap(),
-        selectedPlaceable = selectedPlaceable,
-        unlockedPlaceables = unlockedPlaceables(),
-        mode = mode,
-        easyMode = easyMode,
-        nightsSurvived = nightsSurvived,
-        friendlyMood = if (phase == DayPhase.DAY) MobMood.HELPFUL else MobMood.CALM,
-        chaserMood = if (phase == DayPhase.NIGHT) MobMood.HUNTING else MobMood.CALM,
-        bossMood = when {
-            bossActive -> MobMood.RAGING
-            else -> MobMood.CALM
-        },
-        chaserDistance = chaserDistance,
-        bossActive = bossActive,
-        bossHp = bossHp,
-        bossHpMax = if (easyMode) 2 else 3,
-        lastEvent = lastEvent
-    )
+    fun recipes(): List<BlockQuestLiteRecipe> = RECIPES
 
-    fun exportSaveSnapshot(): SaveSnapshot = SaveSnapshot(
-        world = world.joinToString(separator = ",") { it.name },
-        inventory = inventory.entries.joinToString(separator = ";") { "${it.key.name}:${it.value}" },
-        stars = stars,
-        hearts = hearts,
-        cycleTick = cycleTick,
-        nightsSurvived = nightsSurvived,
-        craftedSinceSunrise = craftedSinceSunrise,
-        easyMode = easyMode,
-        hasPickaxe = hasPickaxe,
-        selectedItem = selectedPlaceable.name,
-        inputMode = mode.name,
-        bossActive = bossActive,
-        bossHp = bossHp,
-        bossTicksLeft = bossTicksLeft,
-        chaserDistance = chaserDistance,
-        rescueCount = rescueCount
-    )
+    fun currentPlaceItem(): BlockQuestLiteItem = PLACEABLE_ITEMS[selectedPlaceIndex]
 
-    fun blockAt(x: Int, y: Int): BlockType = world[indexOf(x, y)]
+    fun currentState(): BlockQuestLiteState {
+        return BlockQuestLiteState(
+            width = WIDTH,
+            height = HEIGHT,
+            world = world.copyOf(),
+            inventory = inventory.toMap(),
+            mode = mode,
+            selectedPlaceIndex = selectedPlaceIndex,
+            hearts = hearts,
+            stars = stars,
+            unlockTier = unlockTier,
+            dayNumber = dayNumber,
+            cycleTick = cycleTick,
+            phase = phase,
+            easyMode = easyMode,
+            shelterScore = shelterScore,
+            craftedThisCycle = craftedThisCycle,
+            bossEventActive = bossEventActive,
+            nightsSurvived = nightsSurvived,
+            boomSproutThreat = boomSproutThreat,
+            glowmewGiftMoments = glowmewGiftMoments,
+            skyWyrmEvents = skyWyrmEvents,
+            rescuedCount = rescuedCount,
+            statusMessage = statusMessage
+        )
+    }
 
-    fun setMode(newMode: InputMode) {
-        mode = newMode
+    fun getBlock(x: Int, y: Int): BlockQuestLiteBlock {
+        if (!inBounds(x, y)) return BlockQuestLiteBlock.AIR
+        return BlockQuestLiteBlock.values()[world[idx(x, y)]]
+    }
+
+    fun getInventory(item: BlockQuestLiteItem): Int = inventory[item] ?: 0
+
+    fun toggleMode() {
+        mode = if (mode == BlockQuestLiteInputMode.MINE) {
+            BlockQuestLiteInputMode.PLACE
+        } else {
+            BlockQuestLiteInputMode.MINE
+        }
+        statusMessage = if (mode == BlockQuestLiteInputMode.MINE) "⛏️ Mine mode" else "🧱 Place mode"
+    }
+
+    fun cyclePlaceItem() {
+        selectedPlaceIndex = (selectedPlaceIndex + 1) % PLACEABLE_ITEMS.size
+        val item = currentPlaceItem()
+        statusMessage = "Selected ${item.name.lowercase()}"
     }
 
     fun toggleEasyMode() {
         easyMode = !easyMode
-        lastEvent = if (easyMode) "🧑‍🍼 Easy mode ON" else "🎯 Easy mode OFF"
+        statusMessage = if (easyMode) "🙂 Easy mode" else "🔥 Brave mode"
     }
 
-    fun cyclePlaceable() {
-        val unlocked = unlockedPlaceables()
-        if (unlocked.isEmpty()) return
-        val current = unlocked.indexOf(selectedPlaceable)
-        val next = if (current < 0) 0 else (current + 1) % unlocked.size
-        selectedPlaceable = unlocked[next]
+    fun tapTile(x: Int, y: Int): Boolean {
+        return if (mode == BlockQuestLiteInputMode.MINE) {
+            mineBlock(x, y)
+        } else {
+            placeBlock(x, y)
+        }
+    }
+
+    fun mineBlock(x: Int, y: Int): Boolean {
+        if (!inBounds(x, y)) return false
+        val current = getBlock(x, y)
+        if (current == BlockQuestLiteBlock.AIR) {
+            statusMessage = "Nothing to mine"
+            return false
+        }
+
+        world[idx(x, y)] = BlockQuestLiteBlock.AIR.ordinal
+
+        val item = toItem(current)
+        if (item != null) {
+            addInventory(item, 1)
+            if (current == BlockQuestLiteBlock.STONE && ((x + y + dayNumber + cycleTick) % 5 == 0)) {
+                addInventory(BlockQuestLiteItem.CRYSTAL, 1)
+                statusMessage = "Found a crystal!"
+            } else {
+                statusMessage = "+1 ${item.name.lowercase()}"
+            }
+        }
+
+        shelterScore = computeShelterScore()
+        return true
+    }
+
+    fun placeBlock(x: Int, y: Int): Boolean {
+        if (!inBounds(x, y)) return false
+        if (getBlock(x, y) != BlockQuestLiteBlock.AIR) {
+            statusMessage = "Space is full"
+            return false
+        }
+
+        val selectedItem = currentPlaceItem()
+        val selectedBlock = toBlock(selectedItem)
+        if (selectedBlock == null) {
+            statusMessage = "Cannot place this item"
+            return false
+        }
+
+        if (getInventory(selectedItem) <= 0) {
+            statusMessage = "Need ${selectedItem.name.lowercase()}"
+            return false
+        }
+
+        world[idx(x, y)] = selectedBlock.ordinal
+        addInventory(selectedItem, -1)
+
+        shelterScore = computeShelterScore()
+        statusMessage = "Placed ${selectedItem.name.lowercase()}"
+        return true
     }
 
     fun craft(recipeId: String): Boolean {
-        val recipe = recipes.firstOrNull { it.id == recipeId } ?: return false
-        if (!hasResources(recipe.inputs)) {
-            lastEvent = "❌ Need more blocks"
+        val recipe = RECIPES.firstOrNull { it.id == recipeId }
+            ?: return false
+
+        if (stars < recipe.starsRequired) {
+            statusMessage = "Need ${recipe.starsRequired}⭐"
             return false
         }
 
-        recipe.inputs.forEach { (item, count) -> removeInventory(item, count) }
-        addInventory(recipe.output, recipe.outputCount)
-
-        if (recipe.output == ItemType.PICKAXE) {
-            hasPickaxe = true
-            lastEvent = "⛏️ Pickaxe crafted!"
-        } else {
-            lastEvent = "✨ Crafted ${recipe.icon}"
+        for ((item, amount) in recipe.inputs) {
+            if (getInventory(item) < amount) {
+                statusMessage = "Need more ${item.name.lowercase()}"
+                return false
+            }
         }
 
-        craftedSinceSunrise = true
-        return true
-    }
-
-    fun performTileAction(x: Int, y: Int): Boolean {
-        if (!inBounds(x, y)) return false
-        return when (mode) {
-            InputMode.MINE -> mineTile(x, y)
-            InputMode.PLACE -> placeTile(x, y)
+        recipe.inputs.forEach { (item, amount) ->
+            addInventory(item, -amount)
         }
-    }
+        addInventory(recipe.output.first, recipe.output.second)
 
-    fun mineTile(x: Int, y: Int): Boolean {
-        if (!inBounds(x, y)) return false
-        val block = blockAt(x, y)
-        if (block == BlockType.AIR) return false
-
-        val loot = when (block) {
-            BlockType.AIR -> null
-            BlockType.DIRT -> ItemType.DIRT to 1
-            BlockType.WOOD -> ItemType.WOOD to 1
-            BlockType.STONE -> ItemType.STONE to if (hasPickaxe) 2 else 1
-            BlockType.PLANK -> ItemType.PLANK to 1
-            BlockType.TORCH -> ItemType.TORCH to 1
-            BlockType.CRYSTAL -> ItemType.CRYSTAL to 1
-        }
-
-        setBlock(x, y, BlockType.AIR)
-        loot?.let { addInventory(it.first, it.second) }
-        lastEvent = "⛏️ Mined ${block.name.lowercase()}"
-        return true
-    }
-
-    fun placeTile(x: Int, y: Int): Boolean {
-        if (!inBounds(x, y)) return false
-        if (blockAt(x, y) != BlockType.AIR) {
-            lastEvent = "🧱 Spot occupied"
-            return false
-        }
-        if (selectedPlaceable !in unlockedPlaceables()) {
-            lastEvent = "🔒 Item locked"
-            return false
-        }
-        if ((inventory[selectedPlaceable] ?: 0) <= 0) {
-            lastEvent = "🎒 Need more ${selectedPlaceable.name.lowercase()}"
-            return false
-        }
-
-        val blockType = selectedPlaceable.toBlockType() ?: return false
-        setBlock(x, y, blockType)
-        removeInventory(selectedPlaceable, 1)
-        lastEvent = "🧱 Placed ${selectedPlaceable.name.lowercase()}"
+        craftedThisCycle = true
+        statusMessage = "Crafted ${recipe.output.first.name.lowercase()}"
         return true
     }
 
     fun tick() {
         val previousPhase = phase
+
         cycleTick += 1
         if (cycleTick >= CYCLE_TICKS) {
             cycleTick = 0
+            dayNumber += 1
+            onSunrise()
         }
 
-        phase = if (cycleTick < DAY_TICKS) DayPhase.DAY else DayPhase.NIGHT
+        phase = phaseForTick(cycleTick)
 
         if (previousPhase != phase) {
-            if (phase == DayPhase.NIGHT) {
-                beginNight()
-            } else {
-                beginDay()
+            when (phase) {
+                BlockQuestLitePhase.DUSK -> statusMessage = "🌆 Dusk! Build shelter"
+                BlockQuestLitePhase.NIGHT -> startNightPhase()
+                BlockQuestLitePhase.DAWN -> statusMessage = "🌤️ Hold on, dawn is near"
+                BlockQuestLitePhase.DAY -> statusMessage = "☀️ New day!"
             }
         }
 
-        if (phase == DayPhase.DAY) {
-            handleDayTick()
-        } else {
-            handleNightTick()
+        if (phase == BlockQuestLitePhase.DAY) {
+            processGlowmewGift()
         }
 
-        enforceSelectedPlaceableUnlocked()
+        if (phase == BlockQuestLitePhase.NIGHT) {
+            processNightPressure()
+        }
+
+        shelterScore = computeShelterScore()
     }
 
-    fun shelterScore(): Int {
-        val scoreRaw =
-            scoreIfSolid(1, 4, 18) + // left wall
-            scoreIfSolid(3, 4, 18) + // right wall
-            scoreIfSolid(2, 3, 24) + // roof
-            scoreIfSolid(2, 5, 14) + // floor
-            scoreIfSolid(1, 3, 10) + // roof-left
-            scoreIfSolid(3, 3, 10) + // roof-right
-            scoreIfSolid(1, 5, 3) + // floor-left
-            scoreIfSolid(3, 5, 3) // floor-right
+    fun toSavePayload(): String {
+        val worldString = world.joinToString(",")
+        val inventoryString = BlockQuestLiteItem.values().joinToString(",") {
+            "${it.name}:${getInventory(it)}"
+        }
+        val scalar = listOf(
+            mode.name,
+            selectedPlaceIndex,
+            hearts,
+            stars,
+            unlockTier,
+            dayNumber,
+            cycleTick,
+            phase.name,
+            easyMode,
+            shelterScore,
+            craftedThisCycle,
+            bossEventActive,
+            bossRewardPending,
+            nightsSurvived,
+            boomSproutThreat,
+            glowmewGiftMoments,
+            skyWyrmEvents,
+            rescuedCount,
+            giftCooldownTicks,
+            nightDamageCooldown
+        ).joinToString(",")
 
-        return if (easyMode) maxOf(scoreRaw, EASY_MODE_SHELTER_FLOOR) else scoreRaw
+        return listOf(worldString, inventoryString, scalar).joinToString(";")
     }
 
-    fun isSheltered(): Boolean = shelterScore() >= SHELTER_SAFE_THRESHOLD
+    internal fun debugGrant(item: BlockQuestLiteItem, amount: Int) {
+        addInventory(item, amount)
+    }
 
-    private fun beginNight() {
+    internal fun debugSetBlock(x: Int, y: Int, block: BlockQuestLiteBlock) {
+        if (!inBounds(x, y)) return
+        world[idx(x, y)] = block.ordinal
+        shelterScore = computeShelterScore()
+    }
+
+    private fun restore(payload: String): Boolean {
+        return try {
+            val parts = payload.split(";")
+            if (parts.size < 3) return false
+
+            val worldValues = parts[0].split(",")
+            if (worldValues.size != WIDTH * HEIGHT) return false
+            worldValues.forEachIndexed { index, value ->
+                val ordinal = value.toIntOrNull() ?: 0
+                world[index] = ordinal.coerceIn(0, BlockQuestLiteBlock.values().size - 1)
+            }
+
+            inventory.clear()
+            parts[1].split(",").forEach { token ->
+                val kv = token.split(":")
+                if (kv.size == 2) {
+                    val item = runCatching { BlockQuestLiteItem.valueOf(kv[0]) }.getOrNull()
+                    val amount = kv[1].toIntOrNull() ?: 0
+                    if (item != null && amount > 0) inventory[item] = amount
+                }
+            }
+
+            val s = parts[2].split(",")
+            if (s.size < 20) return false
+
+            mode = BlockQuestLiteInputMode.valueOf(s[0])
+            selectedPlaceIndex = (s[1].toIntOrNull() ?: 0).coerceIn(0, PLACEABLE_ITEMS.lastIndex)
+            hearts = (s[2].toIntOrNull() ?: MAX_HEARTS).coerceIn(1, MAX_HEARTS)
+            stars = max(0, s[3].toIntOrNull() ?: 0)
+            unlockTier = max(1, s[4].toIntOrNull() ?: 1)
+            dayNumber = max(1, s[5].toIntOrNull() ?: 1)
+            cycleTick = (s[6].toIntOrNull() ?: 0).coerceIn(0, CYCLE_TICKS - 1)
+            phase = BlockQuestLitePhase.valueOf(s[7])
+            easyMode = s[8].toBooleanStrictOrNull() ?: true
+            shelterScore = (s[9].toIntOrNull() ?: 0).coerceIn(0, 100)
+            craftedThisCycle = s[10].toBooleanStrictOrNull() ?: false
+            bossEventActive = s[11].toBooleanStrictOrNull() ?: false
+            bossRewardPending = s[12].toBooleanStrictOrNull() ?: false
+            nightsSurvived = max(0, s[13].toIntOrNull() ?: 0)
+            boomSproutThreat = max(0, s[14].toIntOrNull() ?: 0)
+            glowmewGiftMoments = max(0, s[15].toIntOrNull() ?: 0)
+            skyWyrmEvents = max(0, s[16].toIntOrNull() ?: 0)
+            rescuedCount = max(0, s[17].toIntOrNull() ?: 0)
+            giftCooldownTicks = max(0, s[18].toIntOrNull() ?: 20)
+            nightDamageCooldown = max(1, s[19].toIntOrNull() ?: 10)
+
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun startNightPhase() {
+        statusMessage = "🌙 Night! Boom Sprout is out"
+        boomSproutThreat += if (shelterScore >= 70) 0 else 1
+
+        val isBossNight = dayNumber % 3 == 0
+        if (isBossNight) {
+            bossEventActive = true
+            skyWyrmEvents += 1
+            statusMessage = "🐉 Sky Wyrm event!"
+        }
+    }
+
+    private fun processGlowmewGift() {
+        giftCooldownTicks -= 1
+        if (giftCooldownTicks <= 0) {
+            val gift = if ((dayNumber + cycleTick + glowmewGiftMoments) % 3 == 0) {
+                BlockQuestLiteItem.CRYSTAL
+            } else {
+                BlockQuestLiteItem.WOOD
+            }
+            addInventory(gift, 1)
+            glowmewGiftMoments += 1
+            giftCooldownTicks = if (easyMode) 22 else 30
+            statusMessage = "🐾 Glowmew found ${gift.name.lowercase()}"
+        }
+    }
+
+    private fun processNightPressure() {
+        nightDamageCooldown -= 1
+        if (nightDamageCooldown > 0) return
+
+        val baseChance = when {
+            shelterScore >= 75 -> 12
+            shelterScore >= 55 -> 35
+            else -> 72
+        }
+
+        val chance = if (easyMode) max(5, baseChance - 20) else baseChance
+        val bossBonus = if (bossEventActive) 15 else 0
+        val roll = (cycleTick * 7 + dayNumber * 13 + hearts * 5 + boomSproutThreat * 3) % 100
+
+        if (roll < chance + bossBonus) {
+            hearts -= 1
+            boomSproutThreat += 1
+            statusMessage = if (bossEventActive) "🐉 Sky Wyrm struck!" else "🌱 Boom Sprout chased you!"
+            if (hearts <= 0) {
+                rescuePlayer()
+            }
+        }
+
+        nightDamageCooldown = if (easyMode) 12 else 9
+    }
+
+    private fun onSunrise() {
         nightsSurvived += 1
-        chaserDistance = if (easyMode) 5 else CHASER_START_DISTANCE
-        chaserStepClock = 0
-        lastEvent = "🌙 Night! Build and hide!"
 
-        if (nightsSurvived % 3 == 0) {
-            bossActive = true
-            bossHp = if (easyMode) 2 else 3
-            bossTicksLeft = if (easyMode) 16 else 20
-            lastEvent = "🐉 Sky Wyrm appears!"
-        }
+        stars += 1
+        if (craftedThisCycle) stars += 1
+        if (bossEventActive || bossRewardPending) stars += 1
+
+        unlockTier = 1 + (stars / 4)
+
+        craftedThisCycle = false
+        bossRewardPending = bossEventActive
+        bossEventActive = false
+
+        boomSproutThreat = max(0, boomSproutThreat - 1)
+        nightDamageCooldown = 10
+
+        statusMessage = "🌅 Sunrise! +stars"
     }
 
-    private fun beginDay() {
-        stars += 1 // survived the night
-        if (craftedSinceSunrise) {
-            stars += 1
-        }
-        craftedSinceSunrise = false
-
-        if (hearts < MAX_HEARTS) hearts += 1
-
-        petGiftCooldown = if (easyMode) 10 else 12
-        chaserDistance = CHASER_START_DISTANCE
-        chaserStepClock = 0
-
-        lastEvent = "☀️ Sunrise! +stars"
+    private fun rescuePlayer() {
+        rescuedCount += 1
+        hearts = MAX_HEARTS
+        stars = max(0, stars - 1)
+        bossEventActive = false
+        bossRewardPending = false
+        statusMessage = "🛟 Dawn rescue! Try again"
     }
 
-    private fun handleDayTick() {
-        petGiftCooldown -= 1
-        if (petGiftCooldown <= 0) {
-            petGiftCooldown = if (easyMode) 10 else 12
-            if (nightsSurvived % 2 == 0) {
-                addInventory(ItemType.WOOD, 1)
-                lastEvent = "🐾 Glowmew found wood"
-            } else {
-                addInventory(ItemType.CRYSTAL, 1)
-                lastEvent = "🐾 Glowmew found crystal"
-            }
-        }
-    }
+    private fun computeShelterScore(): Int {
+        val anchorX = WIDTH / 2
+        val anchorY = 2
 
-    private fun handleNightTick() {
-        chaserStepClock += 1
-        val stepEvery = if (easyMode) 8 else 5
-        if (chaserStepClock >= stepEvery) {
-            chaserStepClock = 0
-            chaserDistance -= 1
+        var score = 0
+
+        val walls = listOf(
+            anchorX - 1 to anchorY,
+            anchorX + 1 to anchorY,
+            anchorX to anchorY - 1,
+            anchorX to anchorY + 1
+        )
+
+        walls.forEach { (x, y) ->
+            if (getBlock(x, y) != BlockQuestLiteBlock.AIR) score += 20
         }
 
-        if (chaserDistance <= 0) {
-            if (isSheltered()) {
-                chaserDistance = if (easyMode) 4 else 3
-                lastEvent = "🏠 Boom Sprout bounced off your shelter"
-            } else {
-                hearts -= 1
-                chaserDistance = if (easyMode) 5 else CHASER_START_DISTANCE
-                lastEvent = "💥 Boom Sprout hit!"
-                if (hearts <= 0) {
-                    hearts = MAX_HEARTS
-                    stars = maxOf(0, stars - 1)
-                    rescueCount += 1
-                    lastEvent = "🕊️ Dawn rescue! Keep trying"
-                }
+        val ring = mutableListOf<Pair<Int, Int>>()
+        for (dx in -1..1) {
+            for (dy in -1..1) {
+                if (dx == 0 && dy == 0) continue
+                ring += (anchorX + dx) to (anchorY + dy)
             }
         }
 
-        if (bossActive) {
-            bossTicksLeft -= 1
-            if (isSheltered() && cycleTick % 4 == 0) {
-                bossHp -= 1
-            }
-            if (bossHp <= 0) {
-                bossActive = false
-                stars += 3
-                lastEvent = "🌟 Sky Wyrm calmed! +3 stars"
-            } else if (bossTicksLeft <= 0) {
-                bossActive = false
-                lastEvent = "🐉 Sky Wyrm flew away"
-            }
+        val openings = ring.count { (x, y) -> getBlock(x, y) == BlockQuestLiteBlock.AIR }
+        score -= openings * 4
+
+        val torchCount = ring.count { (x, y) -> getBlock(x, y) == BlockQuestLiteBlock.TORCH }
+        score += min(3, torchCount) * 8
+
+        val floorBand = (anchorX - 1..anchorX + 1).count { x ->
+            getBlock(x, anchorY + 2) != BlockQuestLiteBlock.AIR
         }
+        score += floorBand * 5
+
+        return score.coerceIn(0, 100)
     }
 
-    private fun unlockedPlaceables(): List<ItemType> {
-        val tier = unlockTier()
-        val list = mutableListOf(ItemType.DIRT, ItemType.WOOD)
-        if (tier >= 1) list += ItemType.STONE
-        if (tier >= 2) list += ItemType.PLANK
-        if (tier >= 3) list += ItemType.TORCH
-        if (tier >= 4) list += ItemType.CRYSTAL
-        return list
-    }
-
-    private fun unlockTier(): Int = when {
-        stars >= 9 -> 4
-        stars >= 6 -> 3
-        stars >= 4 -> 2
-        stars >= 2 -> 1
-        else -> 0
-    }
-
-    private fun enforceSelectedPlaceableUnlocked() {
-        if (selectedPlaceable !in unlockedPlaceables()) {
-            selectedPlaceable = unlockedPlaceables().first()
-        }
-    }
-
-    private fun seedWorld() {
-        world.indices.forEach { world[it] = BlockType.AIR }
-
-        for (x in 0 until WORLD_WIDTH) {
-            setBlock(x, WORLD_HEIGHT - 1, BlockType.DIRT)
-            if (x % 2 == 0) setBlock(x, WORLD_HEIGHT - 2, BlockType.STONE)
-        }
-
-        setBlock(5, 4, BlockType.WOOD)
-        setBlock(6, 4, BlockType.WOOD)
-        setBlock(7, 4, BlockType.CRYSTAL)
-        setBlock(8, 4, BlockType.STONE)
-
-        // tiny starter shelter frame target around (2,4) interior
-        setBlock(2, 5, BlockType.DIRT)
-    }
-
-    private fun seedInventory() {
-        inventory.clear()
-        inventory[ItemType.DIRT] = 8
-        inventory[ItemType.WOOD] = 5
-        inventory[ItemType.STONE] = 1
-    }
-
-    private fun restore(snapshot: SaveSnapshot) {
-        val worldTokens = snapshot.world.split(",")
-        if (worldTokens.size == world.size) {
-            for (i in world.indices) {
-                world[i] = runCatching { BlockType.valueOf(worldTokens[i]) }.getOrDefault(BlockType.AIR)
-            }
-        } else {
-            seedWorld()
-        }
-
-        inventory.clear()
-        if (snapshot.inventory.isNotBlank()) {
-            snapshot.inventory.split(";").forEach { token ->
-                val pair = token.split(":")
-                if (pair.size == 2) {
-                    val item = runCatching { ItemType.valueOf(pair[0]) }.getOrNull()
-                    val count = pair[1].toIntOrNull() ?: 0
-                    if (item != null && count > 0) inventory[item] = count
-                }
-            }
-        }
-
-        stars = snapshot.stars
-        hearts = snapshot.hearts.coerceIn(1, MAX_HEARTS)
-        cycleTick = snapshot.cycleTick.coerceIn(0, CYCLE_TICKS - 1)
-        phase = if (cycleTick < DAY_TICKS) DayPhase.DAY else DayPhase.NIGHT
-        nightsSurvived = snapshot.nightsSurvived.coerceAtLeast(0)
-        craftedSinceSunrise = snapshot.craftedSinceSunrise
-        easyMode = snapshot.easyMode
-        hasPickaxe = snapshot.hasPickaxe
-        selectedPlaceable = runCatching { ItemType.valueOf(snapshot.selectedItem) }.getOrDefault(ItemType.DIRT)
-        mode = runCatching { InputMode.valueOf(snapshot.inputMode) }.getOrDefault(InputMode.MINE)
-        bossActive = snapshot.bossActive
-        bossHp = snapshot.bossHp.coerceAtLeast(0)
-        bossTicksLeft = snapshot.bossTicksLeft.coerceAtLeast(0)
-        chaserDistance = snapshot.chaserDistance.coerceAtLeast(1)
-        rescueCount = snapshot.rescueCount.coerceAtLeast(0)
-    }
-
-    private fun addInventory(item: ItemType, count: Int) {
-        inventory[item] = (inventory[item] ?: 0) + count
-    }
-
-    private fun removeInventory(item: ItemType, count: Int) {
-        val now = (inventory[item] ?: 0) - count
-        if (now <= 0) {
+    private fun addInventory(item: BlockQuestLiteItem, delta: Int) {
+        val next = (inventory[item] ?: 0) + delta
+        if (next <= 0) {
             inventory.remove(item)
         } else {
-            inventory[item] = now
+            inventory[item] = next
         }
     }
 
-    private fun hasResources(cost: Map<ItemType, Int>): Boolean = cost.all { (item, count) ->
-        (inventory[item] ?: 0) >= count
+    private fun generateInitialWorld() {
+        for (y in 0 until HEIGHT) {
+            for (x in 0 until WIDTH) {
+                val block = when {
+                    y >= HEIGHT - 1 -> BlockQuestLiteBlock.STONE
+                    y >= HEIGHT - 2 -> if (x % 3 == 0) BlockQuestLiteBlock.STONE else BlockQuestLiteBlock.DIRT
+                    y == HEIGHT - 3 -> BlockQuestLiteBlock.DIRT
+                    y == HEIGHT - 4 && (x == 1 || x == WIDTH - 2) -> BlockQuestLiteBlock.WOOD
+                    y == HEIGHT - 4 && (x == WIDTH / 2 || x == WIDTH / 2 + 1) -> BlockQuestLiteBlock.CRYSTAL
+                    else -> BlockQuestLiteBlock.AIR
+                }
+                world[idx(x, y)] = block.ordinal
+            }
+        }
+
+        inventory.clear()
+        inventory[BlockQuestLiteItem.DIRT] = 3
+        inventory[BlockQuestLiteItem.WOOD] = 2
+        inventory[BlockQuestLiteItem.TORCH] = 1
     }
 
-    private fun ItemType.toBlockType(): BlockType? = when (this) {
-        ItemType.DIRT -> BlockType.DIRT
-        ItemType.WOOD -> BlockType.WOOD
-        ItemType.STONE -> BlockType.STONE
-        ItemType.PLANK -> BlockType.PLANK
-        ItemType.TORCH -> BlockType.TORCH
-        ItemType.CRYSTAL -> BlockType.CRYSTAL
-        ItemType.PICKAXE -> null
+    private fun inBounds(x: Int, y: Int): Boolean {
+        return x in 0 until WIDTH && y in 0 until HEIGHT
     }
 
-    private fun inBounds(x: Int, y: Int): Boolean =
-        x in 0 until WORLD_WIDTH && y in 0 until WORLD_HEIGHT
-
-    private fun setBlock(x: Int, y: Int, block: BlockType) {
-        world[indexOf(x, y)] = block
-    }
-
-    private fun scoreIfSolid(x: Int, y: Int, score: Int): Int {
-        if (!inBounds(x, y)) return 0
-        return if (blockAt(x, y) != BlockType.AIR) score else 0
-    }
-
-    private fun indexOf(x: Int, y: Int): Int = y * WORLD_WIDTH + x
-
-    companion object {
-        const val WORLD_WIDTH = 10
-        const val WORLD_HEIGHT = 8
-
-        const val DAY_TICKS = 36
-        const val NIGHT_TICKS = 24
-        const val CYCLE_TICKS = DAY_TICKS + NIGHT_TICKS
-
-        const val MAX_HEARTS = 3
-        const val SHELTER_SAFE_THRESHOLD = 70
-        const val EASY_MODE_SHELTER_FLOOR = 35
-        const val CHASER_START_DISTANCE = 4
-    }
+    private fun idx(x: Int, y: Int): Int = y * WIDTH + x
 }

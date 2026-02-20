@@ -1,65 +1,62 @@
 # Tasks — Kids Minecraft Lite v4
 
-## Phase A — Planning & deep analysis
+## A) Research and planning (mandatory depth)
 
-- [x] Create `docs/fantasy-gap-analysis.md`
-  - Acceptance: includes retrospective + legal-safe fantasy mapping table.
-- [x] Create `docs/deep-research.md`
-  - Acceptance: includes >=10 competitor teardown across iOS/Android/online, kid-psychology loop analysis, moat matrix.
-- [x] Create `docs/prd.md`
-  - Acceptance: goals, scope, safety/legal constraints, success criteria.
-- [x] Create `docs/spec.md`
-  - Acceptance: concrete gameplay/UX/technical specs tied to research.
-- [x] Create `docs/technical-plan.md`
-  - Acceptance: architecture, save/test strategy, risks/mitigations.
-- [x] Create `docs/architecture-diagram.md`
-  - Acceptance: clear component and data flow diagram.
-- [x] Capture Codex CLI planning evidence
-  - Acceptance: `docs/codex-planning-output.txt` exists.
+- [x] Competitor teardown (>=10 references across iOS/Android/online)
+  - Acceptance: includes what kids love, churn points, and design takeaways.
+  - Evidence: `docs/market-analysis.md`
+- [x] Child psychology loop analysis mapped to mechanics
+  - Acceptance: autonomy, competence, social imagination, short-session reward mapping present.
+  - Evidence: `docs/market-analysis.md`
+- [x] Moat matrix with >=5 strategic moats + execution implications
+  - Acceptance: moat and implementation consequences clearly documented.
+  - Evidence: `docs/moat-and-positioning.md`
+- [x] Retrospective of prior-version gap and v4 fixes
+  - Acceptance: table maps each failure mode to correction.
+  - Evidence: `docs/fantasy-gap-analysis.md`
 
-## Phase B — Implementation (Android native)
+## B) Planning docs deliverables
 
-- [x] Rename app/package from template to v4 identity
-  - Acceptance: Gradle namespace/applicationId updated and app launches.
-- [x] Implement voxel-like tile world renderer (2.5D acceptable)
-  - Acceptance: visible block grid with day/night visual differentiation.
-- [x] Implement mine/place loop
-  - Acceptance: tile mining gives resources; placing consumes resources.
-- [x] Implement tiny crafting panel (3–5 recipes)
-  - Acceptance: valid craft success; invalid craft fails gracefully.
-- [x] Implement day/night cycle with night danger
-  - Acceptance: repeated transitions and increased danger at night.
-- [x] Implement 3 mob archetypes
-  - Acceptance: friendly helper, chaser threat, boss event all represented in state/UI.
-- [x] Implement shelter score safety mechanic
-  - Acceptance: safety score changes with enclosure and mitigates night risk.
-- [x] Implement stars + unlock progression
-  - Acceptance: stars earned from loop events and unlocks trigger by thresholds.
-- [x] Implement local save/load
-  - Acceptance: restart app and state persists.
-- [x] Capture Codex CLI coding evidence
-  - Acceptance: `docs/codex-coding-output.txt` exists.
+- [x] `docs/fantasy-gap-analysis.md`
+- [x] `docs/market-analysis.md`
+- [x] `docs/moat-and-positioning.md`
+- [x] `docs/prd.md`
+- [x] `docs/spec.md`
+- [x] `docs/technical-plan.md`
+- [x] `docs/architecture-diagram.md`
+- [x] `docs/tasks.md`
 
-## Phase C — Quality gates
+## C) MVP implementation (Android native Gradle)
 
-- [x] Add unit tests for world logic
-  - Acceptance: tests cover mine/place invariants.
-- [x] Add unit tests for crafting
-  - Acceptance: recipe success/failure validated.
-- [x] Add unit tests for day/night
-  - Acceptance: phase and night counters deterministic.
-- [x] Add unit tests for mob rules
-  - Acceptance: friendly/chaser/boss behaviors tested.
-- [x] Add unit tests for shelter safety
-  - Acceptance: score thresholds validated.
-- [x] Run quality gate command
-  - Acceptance: `./gradlew test assembleDebug` passes.
+- [x] Day/night cycle
+  - Acceptance: deterministic phase transitions and sunrise rewards.
+- [x] Mine/place loop
+  - Acceptance: mine collects resources; place consumes inventory.
+- [x] Tiny crafting (3–5 recipes)
+  - Acceptance: 4 recipes with input checks and outputs.
+- [x] Original mob archetypes
+  - Acceptance: Glowmew helper, Boom Sprout chaser pressure, Sky Wyrm periodic boss-event pressure.
+- [x] Shelter safety score
+  - Acceptance: score updates with enclosure/torch state and influences night danger.
+- [x] Progression + local save
+  - Acceptance: stars/tier progression and SharedPreferences save/load payload.
+- [x] Icon-first minimal text, kid-friendly controls
+  - Acceptance: emoji-forward HUD/buttons with large touch targets.
 
-## Phase D — Delivery
+## D) Quality gates
 
-- [x] Write `docs/release-summary.md`
-  - Acceptance: feature checklist + quality output + Codex snippets + “why this now feels like Minecraft for kids”.
-- [x] Initialize git and commit final state
-  - Acceptance: clean history with clear final commit.
-- [x] Push repository to GitHub `iamconanpeter/kids-minecraft-lite-v4`
-  - Acceptance: remote repo accessible with final commit.
+- [x] Unit tests for world/crafting/mob/day-night/shelter logic
+  - Acceptance: tests exist in `app/src/test/.../BlockQuestLiteEngineTest.kt`
+- [x] `./gradlew test assembleDebug` pass run recorded
+  - Acceptance: successful command output captured in release summary.
+
+## E) Delivery
+
+- [x] Codex CLI planning evidence
+  - Acceptance: `docs/codex-planning-output.txt`
+- [x] Codex CLI coding evidence
+  - Acceptance: `docs/codex-coding-output.txt`
+- [x] `docs/release-summary.md`
+  - Acceptance: includes codex snippets + test output + “Why this feels like Minecraft for kids”.
+- [ ] Git init/commit/push to `iamconanpeter/kids-minecraft-lite-v4`
+  - Acceptance: remote contains final commit hash.

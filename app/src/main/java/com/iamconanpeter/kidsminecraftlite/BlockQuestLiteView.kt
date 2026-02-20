@@ -17,285 +17,301 @@ class BlockQuestLiteView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     private val engine = BlockQuestLiteEngine(progressManager.load())
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    private val mineRect = RectF()
-    private val placeRect = RectF()
-    private val cycleRect = RectF()
-    private val craftRect = RectF()
-    private val easyRect = RectF()
+    private val blockPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = dp(14f)
+    }
+    private val hudPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(170, 10, 20, 25)
+    }
+    private val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(1.5f)
+    }
+
     private val worldRect = RectF()
+    private val modeRect = RectF()
+    private val cycleRect = RectF()
+    private val craftToggleRect = RectF()
+    private val easyRect = RectF()
+    private val recipeRects = mutableMapOf<String, RectF>()
 
-    private val recipeRects = mutableListOf<RectF>()
-    private var craftPanelOpen = false
-
-    private var tickCount = 0
+    private var craftPanelVisible = false
+    private var running = false
 
     private val tickRunnable = object : Runnable {
         override fun run() {
+            if (!running) return
             engine.tick()
-            tickCount += 1
-            if (tickCount % 8 == 0) {
+            if (engine.currentState().cycleTick % 15 == 0) {
                 persistState()
             }
             invalidate()
-            postDelayed(this, TICK_MS)
+            postDelayed(this, 130L)
         }
     }
 
     init {
-        post(tickRunnable)
+        isFocusable = true
+        isClickable = true
     }
 
-    fun persistState() {
-        progressManager.save(engine.exportSaveSnapshot())
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!running) {
+            running = true
+            post(tickRunnable)
+        }
     }
 
     override fun onDetachedFromWindow() {
+        running = false
         removeCallbacks(tickRunnable)
         persistState()
         super.onDetachedFromWindow()
     }
 
+    fun persistState() {
+        progressManager.save(engine.toSavePayload())
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val s = engine.snapshot()
 
-        drawBackground(canvas, s)
-        layoutRects(width.toFloat(), height.toFloat(), craftPanelOpen)
-        drawHud(canvas, s)
-        drawWorld(canvas, s)
-        drawControls(canvas, s)
-        if (craftPanelOpen) drawCraftPanel(canvas, s)
+        val state = engine.currentState()
+        drawBackground(canvas, state)
+        drawWorld(canvas, state)
+        drawHud(canvas, state)
+        drawControls(canvas, state)
+        if (craftPanelVisible) {
+            drawCraftPanel(canvas, state)
+        }
+    }
+
+    private fun drawBackground(canvas: Canvas, state: BlockQuestLiteState) {
+        val color = when (state.phase) {
+            BlockQuestLitePhase.DAY -> Color.rgb(83, 171, 255)
+            BlockQuestLitePhase.DUSK -> Color.rgb(164, 109, 196)
+            BlockQuestLitePhase.NIGHT -> Color.rgb(35, 45, 83)
+            BlockQuestLitePhase.DAWN -> Color.rgb(120, 163, 214)
+        }
+        canvas.drawColor(color)
+    }
+
+    private fun drawWorld(canvas: Canvas, state: BlockQuestLiteState) {
+        val topPadding = dp(74f)
+        val bottomReserved = dp(if (craftPanelVisible) 210f else 126f)
+        val availableHeight = height - topPadding - bottomReserved
+        val cell = min(width / state.width.toFloat(), availableHeight / state.height.toFloat())
+        val worldWidth = cell * state.width
+        val worldHeight = cell * state.height
+
+        val left = (width - worldWidth) / 2f
+        val top = topPadding
+
+        worldRect.set(left, top, left + worldWidth, top + worldHeight)
+
+        for (y in 0 until state.height) {
+            for (x in 0 until state.width) {
+                val block = BlockQuestLiteBlock.values()[state.world[y * state.width + x]]
+                val l = left + x * cell
+                val t = top + y * cell
+                val r = l + cell
+                val b = t + cell
+
+                blockPaint.color = blockColor(block)
+                canvas.drawRect(l, t, r, b, blockPaint)
+
+                if (block != BlockQuestLiteBlock.AIR) {
+                    blockPaint.color = darken(blockColor(block), 0.22f)
+                    canvas.drawRect(l, t + cell * 0.72f, r, b, blockPaint)
+                    borderPaint.color = Color.argb(120, 0, 0, 0)
+                    canvas.drawRect(l, t, r, b, borderPaint)
+                } else {
+                    borderPaint.color = Color.argb(35, 255, 255, 255)
+                    canvas.drawRect(l, t, r, b, borderPaint)
+                }
+            }
+        }
+    }
+
+    private fun drawHud(canvas: Canvas, state: BlockQuestLiteState) {
+        canvas.drawRoundRect(0f, 0f, width.toFloat(), dp(70f), dp(12f), dp(12f), hudPaint)
+
+        textPaint.textSize = dp(14f)
+        canvas.drawText(timeIcon(state.phase) + " Day ${state.dayNumber}", dp(10f), dp(22f), textPaint)
+        canvas.drawText("❤️ ${state.hearts}   ⭐ ${state.stars}   🛡️ ${state.shelterScore}", dp(10f), dp(42f), textPaint)
+
+        val mobLine = buildString {
+            append("🐾")
+            if (state.phase == BlockQuestLitePhase.NIGHT) append(" 🌱")
+            if (state.bossEventActive) append(" 🐉")
+            append("   ")
+            append(if (state.easyMode) "🙂" else "🔥")
+            append("   T${state.unlockTier}")
+        }
+
+        canvas.drawText(mobLine, width - dp(150f), dp(22f), textPaint)
+
+        textPaint.textSize = dp(12f)
+        canvas.drawText(state.statusMessage, width / 2f - dp(130f), dp(62f), textPaint)
+    }
+
+    private fun drawControls(canvas: Canvas, state: BlockQuestLiteState) {
+        val h = dp(44f)
+        val gap = dp(8f)
+        val y = height - h - dp(16f)
+        val buttonW = (width - dp(16f) - gap * 3) / 4f
+
+        modeRect.set(dp(8f), y, dp(8f) + buttonW, y + h)
+        cycleRect.set(modeRect.right + gap, y, modeRect.right + gap + buttonW, y + h)
+        craftToggleRect.set(cycleRect.right + gap, y, cycleRect.right + gap + buttonW, y + h)
+        easyRect.set(craftToggleRect.right + gap, y, craftToggleRect.right + gap + buttonW, y + h)
+
+        drawButton(canvas, modeRect, if (state.mode == BlockQuestLiteInputMode.MINE) "⛏️" else "🧱")
+        drawButton(canvas, cycleRect, itemIcon(engine.currentPlaceItem()))
+        drawButton(canvas, craftToggleRect, if (craftPanelVisible) "❌" else "🧪")
+        drawButton(canvas, easyRect, if (state.easyMode) "🙂" else "🔥")
+    }
+
+    private fun drawCraftPanel(canvas: Canvas, state: BlockQuestLiteState) {
+        val panelBottom = height - dp(66f)
+        val panelTop = panelBottom - dp(128f)
+        val panelRect = RectF(dp(8f), panelTop, width - dp(8f), panelBottom)
+
+        buttonPaint.color = Color.argb(210, 17, 24, 31)
+        canvas.drawRoundRect(panelRect, dp(12f), dp(12f), buttonPaint)
+
+        textPaint.textSize = dp(12f)
+        canvas.drawText("Craft", panelRect.left + dp(10f), panelRect.top + dp(18f), textPaint)
+
+        recipeRects.clear()
+        val recipes = engine.recipes()
+        val cols = 2
+        val spacing = dp(8f)
+        val cellW = (panelRect.width() - spacing * 3) / cols
+        val cellH = (panelRect.height() - spacing * 3) / 2f
+
+        recipes.forEachIndexed { i, recipe ->
+            val col = i % cols
+            val row = i / cols
+            val left = panelRect.left + spacing + col * (cellW + spacing)
+            val top = panelRect.top + dp(22f) + row * (cellH + spacing)
+            val rect = RectF(left, top, left + cellW, top + cellH)
+            recipeRects[recipe.id] = rect
+
+            val allowed = state.stars >= recipe.starsRequired
+            buttonPaint.color = if (allowed) Color.rgb(56, 95, 79) else Color.rgb(90, 66, 66)
+            canvas.drawRoundRect(rect, dp(10f), dp(10f), buttonPaint)
+
+            textPaint.textSize = dp(11f)
+            canvas.drawText(recipe.icon, rect.left + dp(8f), rect.top + dp(18f), textPaint)
+            val needs = recipe.inputs.entries.joinToString(" ") { "${itemIcon(it.key)}${it.value}" }
+            canvas.drawText(needs, rect.left + dp(8f), rect.top + dp(34f), textPaint)
+            val out = "${itemIcon(recipe.output.first)}x${recipe.output.second}"
+            canvas.drawText(out, rect.left + dp(8f), rect.top + dp(50f), textPaint)
+
+            if (!allowed) {
+                canvas.drawText("Need ${recipe.starsRequired}⭐", rect.left + dp(8f), rect.top + dp(64f), textPaint)
+            }
+        }
+    }
+
+    private fun drawButton(canvas: Canvas, rect: RectF, label: String) {
+        buttonPaint.color = Color.argb(200, 17, 24, 31)
+        canvas.drawRoundRect(rect, dp(10f), dp(10f), buttonPaint)
+        borderPaint.color = Color.argb(120, 255, 255, 255)
+        canvas.drawRoundRect(rect, dp(10f), dp(10f), borderPaint)
+
+        textPaint.textSize = dp(20f)
+        val x = rect.left + rect.width() / 2f - dp(9f)
+        val y = rect.top + rect.height() / 2f + dp(7f)
+        canvas.drawText(label, x, y, textPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action != MotionEvent.ACTION_DOWN) return true
+
         val x = event.x
         val y = event.y
 
-        if (mineRect.contains(x, y)) {
-            engine.setMode(BlockQuestLiteEngine.InputMode.MINE)
-            invalidate()
-            return true
-        }
-        if (placeRect.contains(x, y)) {
-            engine.setMode(BlockQuestLiteEngine.InputMode.PLACE)
-            invalidate()
-            return true
-        }
-        if (cycleRect.contains(x, y)) {
-            engine.cyclePlaceable()
-            invalidate()
-            return true
-        }
-        if (craftRect.contains(x, y)) {
-            craftPanelOpen = !craftPanelOpen
-            invalidate()
-            return true
-        }
-        if (easyRect.contains(x, y)) {
-            engine.toggleEasyMode()
-            invalidate()
-            return true
-        }
-
-        if (craftPanelOpen) {
-            recipeRects.forEachIndexed { index, rect ->
-                if (rect.contains(x, y)) {
-                    engine.craft(safeRecipeId(index))
-                    invalidate()
-                    return true
-                }
+        when {
+            modeRect.contains(x, y) -> engine.toggleMode()
+            cycleRect.contains(x, y) -> engine.cyclePlaceItem()
+            craftToggleRect.contains(x, y) -> craftPanelVisible = !craftPanelVisible
+            easyRect.contains(x, y) -> engine.toggleEasyMode()
+            craftPanelVisible && tapRecipe(x, y) -> {
+                // handled
+            }
+            worldRect.contains(x, y) -> {
+                val state = engine.currentState()
+                val cell = worldRect.width() / state.width
+                val gridX = ((x - worldRect.left) / cell).toInt().coerceIn(0, state.width - 1)
+                val gridY = ((y - worldRect.top) / cell).toInt().coerceIn(0, state.height - 1)
+                engine.tapTile(gridX, gridY)
             }
         }
 
-        if (worldRect.contains(x, y)) {
-            val s = engine.snapshot()
-            val tileSize = worldRect.width() / s.width
-            val tx = ((x - worldRect.left) / tileSize).toInt()
-            val ty = ((y - worldRect.top) / tileSize).toInt()
-            engine.performTileAction(tx, ty)
-            invalidate()
-            return true
-        }
-
+        invalidate()
         return true
     }
 
-    private fun safeRecipeId(index: Int): String {
-        val recipes = engine.recipes
-        if (index < 0 || index >= recipes.size) return recipes.first().id
-        return recipes[index].id
-    }
-
-    private fun drawBackground(canvas: Canvas, s: BlockQuestLiteEngine.GameSnapshot) {
-        val dayColor = Color.rgb(142, 210, 255)
-        val nightColor = Color.rgb(22, 30, 72)
-        paint.style = Paint.Style.FILL
-        paint.color = if (s.phase == BlockQuestLiteEngine.DayPhase.DAY) dayColor else nightColor
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
-
-        paint.color = if (s.phase == BlockQuestLiteEngine.DayPhase.DAY) Color.rgb(103, 188, 98) else Color.rgb(41, 73, 58)
-        canvas.drawRect(0f, height * 0.45f, width.toFloat(), height.toFloat(), paint)
-    }
-
-    private fun drawHud(canvas: Canvas, s: BlockQuestLiteEngine.GameSnapshot) {
-        paint.color = Color.WHITE
-        paint.textSize = sp(18f)
-        paint.style = Paint.Style.FILL
-
-        val sunMoon = if (s.phase == BlockQuestLiteEngine.DayPhase.DAY) "☀️" else "🌙"
-        canvas.drawText("$sunMoon  ⭐ ${s.stars}   ❤️ ${s.hearts}/${s.maxHearts}", dp(12f), dp(28f), paint)
-        canvas.drawText("🏠 ${s.shelterScore}%   🐾 ${mobLine(s)}", dp(12f), dp(52f), paint)
-
-        paint.textSize = sp(13f)
-        canvas.drawText(s.lastEvent, dp(12f), dp(74f), paint)
-    }
-
-    private fun mobLine(s: BlockQuestLiteEngine.GameSnapshot): String {
-        val chaser = "💥${s.chaserDistance}"
-        val boss = if (s.bossActive) " 🐉${s.bossHp}/${s.bossHpMax}" else ""
-        return "$chaser$boss"
-    }
-
-    private fun drawWorld(canvas: Canvas, s: BlockQuestLiteEngine.GameSnapshot) {
-        val tileSize = worldRect.width() / s.width
-        for (y in 0 until s.height) {
-            for (x in 0 until s.width) {
-                val idx = y * s.width + x
-                val block = s.world[idx]
-                val left = worldRect.left + x * tileSize
-                val top = worldRect.top + y * tileSize
-                val rect = RectF(left, top, left + tileSize - dp(1f), top + tileSize - dp(1f))
-
-                paint.style = Paint.Style.FILL
-                paint.color = blockColor(block)
-                canvas.drawRoundRect(rect, dp(4f), dp(4f), paint)
-
-                // simple 2.5D lower shade
-                paint.color = shade(blockColor(block), 0.82f)
-                canvas.drawRect(rect.left, rect.bottom - dp(5f), rect.right, rect.bottom, paint)
+    private fun tapRecipe(x: Float, y: Float): Boolean {
+        for ((id, rect) in recipeRects) {
+            if (rect.contains(x, y)) {
+                engine.craft(id)
+                return true
             }
         }
-
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = dp(2f)
-        paint.color = Color.argb(190, 255, 255, 255)
-        canvas.drawRect(worldRect, paint)
+        return false
     }
 
-    private fun drawControls(canvas: Canvas, s: BlockQuestLiteEngine.GameSnapshot) {
-        drawButton(canvas, mineRect, if (s.mode == BlockQuestLiteEngine.InputMode.MINE) "⛏️" else "⛏", s.mode == BlockQuestLiteEngine.InputMode.MINE)
-        drawButton(canvas, placeRect, if (s.mode == BlockQuestLiteEngine.InputMode.PLACE) "🧱" else "⬜", s.mode == BlockQuestLiteEngine.InputMode.PLACE)
-        drawButton(canvas, cycleRect, "🎒 ${shortItem(s.selectedPlaceable)}", false)
-        drawButton(canvas, craftRect, if (craftPanelOpen) "🛠️▲" else "🛠️▼", craftPanelOpen)
-        drawButton(canvas, easyRect, if (s.easyMode) "🧑‍🍼ON" else "🧑‍🍼OFF", s.easyMode)
-    }
-
-    private fun drawCraftPanel(canvas: Canvas, s: BlockQuestLiteEngine.GameSnapshot) {
-        val panelTop = craftRect.bottom + dp(8f)
-        val panelBottom = panelTop + dp(190f)
-        val panel = RectF(dp(12f), panelTop, width - dp(12f), panelBottom)
-
-        paint.style = Paint.Style.FILL
-        paint.color = Color.argb(210, 20, 20, 24)
-        canvas.drawRoundRect(panel, dp(12f), dp(12f), paint)
-
-        paint.textSize = sp(13f)
-        paint.color = Color.WHITE
-        canvas.drawText("Tiny Craft", panel.left + dp(12f), panel.top + dp(18f), paint)
-
-        recipeRects.clear()
-        val itemHeight = dp(34f)
-        var top = panel.top + dp(26f)
-
-        s.unlockedPlaceables
-        engine.recipes.forEach { recipe ->
-            val row = RectF(panel.left + dp(10f), top, panel.right - dp(10f), top + itemHeight)
-            recipeRects += row
-
-            paint.color = Color.argb(180, 60, 90, 150)
-            canvas.drawRoundRect(row, dp(8f), dp(8f), paint)
-
-            paint.color = Color.WHITE
-            paint.textSize = sp(12f)
-            val ok = recipe.inputs.all { (item, need) -> (s.inventory[item] ?: 0) >= need }
-            val status = if (ok) "✅" else "❌"
-            canvas.drawText("${recipe.icon}  $status", row.left + dp(8f), row.centerY() + dp(4f), paint)
-
-            top += itemHeight + dp(6f)
+    private fun blockColor(block: BlockQuestLiteBlock): Int {
+        return when (block) {
+            BlockQuestLiteBlock.AIR -> Color.argb(0, 0, 0, 0)
+            BlockQuestLiteBlock.DIRT -> Color.rgb(141, 102, 68)
+            BlockQuestLiteBlock.WOOD -> Color.rgb(194, 154, 101)
+            BlockQuestLiteBlock.STONE -> Color.rgb(128, 132, 145)
+            BlockQuestLiteBlock.PLANK -> Color.rgb(214, 183, 126)
+            BlockQuestLiteBlock.TORCH -> Color.rgb(252, 185, 48)
+            BlockQuestLiteBlock.CRYSTAL -> Color.rgb(111, 222, 255)
         }
     }
 
-    private fun drawButton(canvas: Canvas, rect: RectF, label: String, active: Boolean) {
-        paint.style = Paint.Style.FILL
-        paint.color = if (active) Color.argb(220, 70, 135, 210) else Color.argb(180, 35, 48, 78)
-        canvas.drawRoundRect(rect, dp(10f), dp(10f), paint)
-
-        paint.color = Color.WHITE
-        paint.textSize = sp(14f)
-        val tw = paint.measureText(label)
-        canvas.drawText(label, rect.centerX() - tw / 2f, rect.centerY() + dp(5f), paint)
-    }
-
-    private fun layoutRects(w: Float, h: Float, craftOpen: Boolean) {
-        val tileSide = min((w - dp(24f)) / BlockQuestLiteEngine.WORLD_WIDTH, h * 0.44f / BlockQuestLiteEngine.WORLD_HEIGHT)
-        val worldW = tileSide * BlockQuestLiteEngine.WORLD_WIDTH
-        val worldH = tileSide * BlockQuestLiteEngine.WORLD_HEIGHT
-        val left = (w - worldW) / 2f
-        worldRect.set(left, dp(90f), left + worldW, dp(90f) + worldH)
-
-        val controlsTop = worldRect.bottom + dp(12f)
-        val buttonW = (w - dp(36f)) / 5f
-        val buttonH = dp(40f)
-
-        fun slot(i: Int): RectF {
-            val l = dp(8f) + i * (buttonW + dp(4f))
-            return RectF(l, controlsTop, l + buttonW, controlsTop + buttonH)
+    private fun itemIcon(item: BlockQuestLiteItem): String {
+        return when (item) {
+            BlockQuestLiteItem.DIRT -> "🟫"
+            BlockQuestLiteItem.WOOD -> "🪵"
+            BlockQuestLiteItem.STONE -> "🪨"
+            BlockQuestLiteItem.PLANK -> "📦"
+            BlockQuestLiteItem.TORCH -> "🔥"
+            BlockQuestLiteItem.CRYSTAL -> "💎"
+            BlockQuestLiteItem.PICKAXE -> "⛏️"
         }
-
-        mineRect.set(slot(0))
-        placeRect.set(slot(1))
-        cycleRect.set(slot(2))
-        craftRect.set(slot(3))
-        easyRect.set(slot(4))
-
-        if (!craftOpen) recipeRects.clear()
     }
 
-    private fun shortItem(item: BlockQuestLiteEngine.ItemType): String = when (item) {
-        BlockQuestLiteEngine.ItemType.DIRT -> "DIRT"
-        BlockQuestLiteEngine.ItemType.WOOD -> "WOOD"
-        BlockQuestLiteEngine.ItemType.STONE -> "STONE"
-        BlockQuestLiteEngine.ItemType.PLANK -> "PLANK"
-        BlockQuestLiteEngine.ItemType.TORCH -> "TORCH"
-        BlockQuestLiteEngine.ItemType.CRYSTAL -> "CRYS"
-        BlockQuestLiteEngine.ItemType.PICKAXE -> "PICK"
+    private fun timeIcon(phase: BlockQuestLitePhase): String {
+        return when (phase) {
+            BlockQuestLitePhase.DAY -> "☀️"
+            BlockQuestLitePhase.DUSK -> "🌆"
+            BlockQuestLitePhase.NIGHT -> "🌙"
+            BlockQuestLitePhase.DAWN -> "🌤️"
+        }
     }
 
-    private fun blockColor(block: BlockQuestLiteEngine.BlockType): Int = when (block) {
-        BlockQuestLiteEngine.BlockType.AIR -> Color.argb(35, 255, 255, 255)
-        BlockQuestLiteEngine.BlockType.DIRT -> Color.rgb(130, 89, 54)
-        BlockQuestLiteEngine.BlockType.WOOD -> Color.rgb(154, 112, 58)
-        BlockQuestLiteEngine.BlockType.STONE -> Color.rgb(120, 126, 133)
-        BlockQuestLiteEngine.BlockType.PLANK -> Color.rgb(183, 143, 85)
-        BlockQuestLiteEngine.BlockType.TORCH -> Color.rgb(255, 176, 46)
-        BlockQuestLiteEngine.BlockType.CRYSTAL -> Color.rgb(126, 211, 255)
+    private fun darken(color: Int, amount: Float): Int {
+        val factor = 1f - amount
+        return Color.rgb(
+            (Color.red(color) * factor).toInt().coerceIn(0, 255),
+            (Color.green(color) * factor).toInt().coerceIn(0, 255),
+            (Color.blue(color) * factor).toInt().coerceIn(0, 255)
+        )
     }
 
-    private fun shade(color: Int, factor: Float): Int {
-        val r = (Color.red(color) * factor).toInt().coerceIn(0, 255)
-        val g = (Color.green(color) * factor).toInt().coerceIn(0, 255)
-        val b = (Color.blue(color) * factor).toInt().coerceIn(0, 255)
-        return Color.rgb(r, g, b)
-    }
-
-    private fun dp(value: Float): Float = value * resources.displayMetrics.density
-
-    private fun sp(value: Float): Float = value * resources.displayMetrics.scaledDensity
-
-    companion object {
-        private const val TICK_MS = 700L
+    private fun dp(value: Float): Float {
+        return value * resources.displayMetrics.density
     }
 }

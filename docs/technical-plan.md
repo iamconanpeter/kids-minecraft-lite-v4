@@ -1,106 +1,61 @@
 # Technical Plan — Kids Minecraft Lite v4
 
-## 1. Tech stack
-- Android native (Kotlin + Gradle)
-- Single `app` module
-- Custom `View` rendering (Canvas)
-- Pure Kotlin game engine for deterministic logic + unit tests
+## Stack
+- Kotlin + Android Gradle (single app module)
+- Custom Canvas `View`
+- Pure Kotlin gameplay engine class (no Android dependencies)
+- SharedPreferences for local save
 
-## 2. Planned module structure
+## Core classes
 
 - `BlockQuestLiteEngine.kt`
-  - world state
-  - day/night tick machine
-  - mining/placing
-  - crafting validation
-  - mob behaviors
-  - shelter score
-  - progression stars/unlocks
-- `BlockQuestLiteProgressManager.kt`
-  - snapshot encode/decode
-  - SharedPreferences save/load
+  - deterministic world state
+  - mine/place/craft logic
+  - day/night cycle
+  - mob archetype behavior hooks
+  - shelter scoring
+  - progression/stars/unlocks
+  - serialization
+
 - `BlockQuestLiteView.kt`
-  - rendering
-  - touch input -> engine actions
-  - game loop runnable
+  - render world + HUD + controls
+  - touch routing to engine actions
+  - fixed tick loop with `postDelayed`
+
+- `BlockQuestLiteProgressManager.kt`
+  - load/save serialized engine payload
+
 - `MainActivity.kt`
-  - owns view and save lifecycle
+  - instantiate progress manager + view
+  - persist on pause
 
-## 3. Data model plan
+## Determinism strategy
 
-Core enums:
-- BlockType
-- ItemType
-- MobType
-- InputMode
+- Engine uses fixed integer tick steps
+- Night pressure uses deterministic roll formula from current state
+- Boss event cadence based on day count modulo 3
+- Deterministic loops simplify unit tests and debugging
 
-Core data:
-- World grid (flattened mutable array/list)
-- Inventory map
-- Mob state (friendly, chaser, boss)
-- Time state (tick + phase + nights survived)
-- Safety/progression state (shelter score, stars, unlock tier)
+## Save strategy
 
-## 4. State update strategy
+- Compact string payload via `engine.toSavePayload()`
+- Saved in `SharedPreferences` under `v4_state`
+- Saved periodically and on lifecycle pause/detach
 
-- Engine reducer-like API:
-  - `tick()`
-  - `tapTile(x,y)`
-  - `setMode()`
-  - `cyclePlaceItem()`
-  - `craft(recipeId)`
-  - `toggleEasyMode()`
-- Every mutation returns/updates a snapshot-friendly state
+## Risks and mitigations
 
-## 5. Rendering strategy
+1. **UI hitbox complexity**
+   - Mitigation: explicit RectF controls and separate worldRect tap mapping
+2. **State drift between view and logic**
+   - Mitigation: all game rules centralized in engine
+3. **Scope creep**
+   - Mitigation: strict cap on recipes, blocks, and systems in MVP
+4. **Regression risk**
+   - Mitigation: unit tests for all required logic groups
 
-- 2.5D tile illusion via top face + side shade
-- HUD includes:
-  - day/night indicator
-  - hearts
-  - stars
-  - shelter score meter
-  - mob status icons
-- Bottom action bar:
-  - mine/place toggle
-  - inventory cycle
-  - craft panel toggle
-  - easy mode toggle
+## Quality gate procedure
 
-## 6. Save strategy
-
-- Persist compact snapshot string in SharedPreferences
-- Save schedule:
-  - after major actions
-  - every N ticks
-  - lifecycle detach
-- Load snapshot on app start
-
-## 7. Test plan
-
-Unit tests:
-1. day-night transition and night counters
-2. mine/place behavior and inventory effects
-3. crafting success/fail paths
-4. shelter score thresholds
-5. mob pressure (night damage, boss bonus)
-
-Gate:
-- `./gradlew test assembleDebug` must pass
-
-## 8. Risks and mitigations
-
-1. **Risk:** custom View touch complexity
-   - Mitigation: explicit hitbox map for controls/craft panel
-2. **Risk:** logic drift between UI and engine
-   - Mitigation: keep all rules in engine only
-3. **Risk:** legal confusion around archetypes
-   - Mitigation: original naming + mapping doc and no copied assets
-4. **Risk:** over-scope from deep systems
-   - Mitigation: strict MVP cap (4 recipes, 3 mobs, one world)
-
-## 9. Codex CLI evidence policy
-
-Planning and coding decisions are backed by Codex CLI runs:
-- `docs/codex-planning-output.txt`
-- `docs/codex-coding-output.txt`
+1. Set Java/SDK env vars
+2. Run `./gradlew test`
+3. Run `./gradlew assembleDebug`
+4. If failure, fix and rerun until both pass
