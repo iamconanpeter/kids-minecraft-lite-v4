@@ -2,7 +2,7 @@
 
 Date: 2026-02-20
 Repo: https://github.com/iamconanpeter/kids-minecraft-lite-v4
-Commit: `TBD`
+Commit: `b7a8cae`
 
 ## Scope delivered (UX Patch v4.1)
 
