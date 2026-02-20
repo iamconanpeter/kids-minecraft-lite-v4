@@ -1,5 +1,6 @@
 package com.iamconanpeter.kidsminecraftlite
 
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -35,12 +36,27 @@ enum class BlockQuestLitePhase {
     DAWN
 }
 
+enum class BlockQuestLiteStatusTone {
+    INFO,
+    SUCCESS,
+    WARNING,
+    ERROR,
+    DANGER
+}
+
 data class BlockQuestLiteRecipe(
     val id: String,
     val icon: String,
     val inputs: Map<BlockQuestLiteItem, Int>,
     val output: Pair<BlockQuestLiteItem, Int>,
     val starsRequired: Int = 0
+)
+
+data class BlockQuestLiteShelterEvaluation(
+    val enclosureSafety: Int,
+    val lightQuality: Int,
+    val score: Int,
+    val openings: Int
 )
 
 data class BlockQuestLiteState(
@@ -58,6 +74,8 @@ data class BlockQuestLiteState(
     val phase: BlockQuestLitePhase,
     val easyMode: Boolean,
     val shelterScore: Int,
+    val shelterSafety: Int,
+    val shelterLightQuality: Int,
     val craftedThisCycle: Boolean,
     val bossEventActive: Boolean,
     val nightsSurvived: Int,
@@ -68,6 +86,10 @@ data class BlockQuestLiteState(
     val blocksMined: Int,
     val blocksPlaced: Int,
     val onboardingShelterBuilt: Boolean,
+    val buddyTrust: Int,
+    val buddyHintCharges: Int,
+    val adaptiveGraceNights: Int,
+    val statusTone: BlockQuestLiteStatusTone,
     val statusMessage: String
 )
 
@@ -83,6 +105,8 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         private const val CYCLE_TICKS = DAY_TICKS + DUSK_TICKS + NIGHT_TICKS + DAWN_TICKS
 
         private const val MAX_HEARTS = 5
+        private const val MAX_TRUST = 100
+        private const val MIN_TRUST = 0
 
         private val PLACEABLE_ITEMS = listOf(
             BlockQuestLiteItem.DIRT,
@@ -179,6 +203,9 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
     private var easyMode = true
 
     private var shelterScore = 0
+    private var shelterSafety = 0
+    private var shelterLightQuality = 0
+
     private var craftedThisCycle = false
     private var bossEventActive = false
     private var bossRewardPending = false
@@ -193,18 +220,27 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
     private var blocksPlaced = 0
     private var onboardingShelterBuilt = false
 
+    private var buddyTrust = 26
+    private var buddyHintCharges = 0
+    private var consecutiveRescues = 0
+    private var adaptiveGraceNights = 0
+    private var graceShieldCharges = 0
+    private var rescuedThisCycle = false
+
     private var giftCooldownTicks = 20
-    private var nightDamageCooldown = 10
-    private var statusMessage = "Tap blocks to mine!"
+    private var nightDamageCooldown = 12
+    private var statusTone = BlockQuestLiteStatusTone.INFO
+    private var statusMessage = "⛏️"
 
     init {
         generateInitialWorld()
         if (!savedPayload.isNullOrBlank()) {
             if (!restore(savedPayload)) {
-                statusMessage = "New world ready!"
+                setStatus("🗺️✨", BlockQuestLiteStatusTone.INFO)
             }
         }
-        shelterScore = computeShelterScore()
+        refreshShelter()
+        buddyHintCharges = max(buddyHintCharges, computeBuddyHintCharges())
     }
 
     fun recipes(): List<BlockQuestLiteRecipe> = RECIPES
@@ -227,6 +263,8 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             phase = phase,
             easyMode = easyMode,
             shelterScore = shelterScore,
+            shelterSafety = shelterSafety,
+            shelterLightQuality = shelterLightQuality,
             craftedThisCycle = craftedThisCycle,
             bossEventActive = bossEventActive,
             nightsSurvived = nightsSurvived,
@@ -237,6 +275,10 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             blocksMined = blocksMined,
             blocksPlaced = blocksPlaced,
             onboardingShelterBuilt = onboardingShelterBuilt,
+            buddyTrust = buddyTrust,
+            buddyHintCharges = buddyHintCharges,
+            adaptiveGraceNights = adaptiveGraceNights,
+            statusTone = statusTone,
             statusMessage = statusMessage
         )
     }
@@ -254,17 +296,17 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         } else {
             BlockQuestLiteInputMode.MINE
         }
-        statusMessage = if (mode == BlockQuestLiteInputMode.MINE) "⛏️" else "🧱"
+        setStatus(if (mode == BlockQuestLiteInputMode.MINE) "⛏️" else "🧱", BlockQuestLiteStatusTone.INFO)
     }
 
     fun cyclePlaceItem() {
         selectedPlaceIndex = (selectedPlaceIndex + 1) % PLACEABLE_ITEMS.size
-        statusMessage = "🎒 ${currentPlaceItem().name.lowercase()}"
+        setStatus("🎒 ${currentPlaceItem().name.lowercase()}", BlockQuestLiteStatusTone.INFO)
     }
 
     fun toggleEasyMode() {
         easyMode = !easyMode
-        statusMessage = if (easyMode) "🙂 Calm mode" else "🔥 Brave mode"
+        setStatus(if (easyMode) "🙂🌙" else "🔥🌙", BlockQuestLiteStatusTone.INFO)
     }
 
     fun tapTile(x: Int, y: Int): Boolean {
@@ -279,7 +321,7 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         if (!inBounds(x, y)) return false
         val current = getBlock(x, y)
         if (current == BlockQuestLiteBlock.AIR) {
-            statusMessage = "❔"
+            setStatus("❔", BlockQuestLiteStatusTone.ERROR)
             return false
         }
 
@@ -291,13 +333,13 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             blocksMined += 1
             if (current == BlockQuestLiteBlock.STONE && ((x + y + dayNumber + cycleTick) % 5 == 0)) {
                 addInventory(BlockQuestLiteItem.CRYSTAL, 1)
-                statusMessage = "💎"
+                setStatus("💎", BlockQuestLiteStatusTone.SUCCESS)
             } else {
-                statusMessage = "⛏️+1"
+                setStatus("⛏️+1", BlockQuestLiteStatusTone.SUCCESS)
             }
         }
 
-        shelterScore = computeShelterScore()
+        refreshShelter()
         updateOnboardingShelterProgress()
         return true
     }
@@ -305,19 +347,19 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
     fun placeBlock(x: Int, y: Int): Boolean {
         if (!inBounds(x, y)) return false
         if (getBlock(x, y) != BlockQuestLiteBlock.AIR) {
-            statusMessage = "🚫"
+            setStatus("🚫", BlockQuestLiteStatusTone.ERROR)
             return false
         }
 
         val selectedItem = currentPlaceItem()
         val selectedBlock = toBlock(selectedItem)
         if (selectedBlock == null) {
-            statusMessage = "🚫"
+            setStatus("🚫", BlockQuestLiteStatusTone.ERROR)
             return false
         }
 
         if (getInventory(selectedItem) <= 0) {
-            statusMessage = "📦❌"
+            setStatus("📦❌", BlockQuestLiteStatusTone.ERROR)
             return false
         }
 
@@ -325,9 +367,13 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         addInventory(selectedItem, -1)
         blocksPlaced += 1
 
-        shelterScore = computeShelterScore()
+        if (abs(x - WIDTH / 2) <= 2 && abs(y - 2) <= 2 && isStructural(selectedBlock)) {
+            adjustBuddyTrust(1)
+        }
+
+        refreshShelter()
         updateOnboardingShelterProgress()
-        statusMessage = "🧱✅"
+        setStatus("🧱✅", BlockQuestLiteStatusTone.SUCCESS)
         return true
     }
 
@@ -336,13 +382,13 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             ?: return false
 
         if (stars < recipe.starsRequired) {
-            statusMessage = "🔒 ${recipe.starsRequired}⭐"
+            setStatus("🔒 ${recipe.starsRequired}⭐", BlockQuestLiteStatusTone.ERROR)
             return false
         }
 
         for ((item, amount) in recipe.inputs) {
             if (getInventory(item) < amount) {
-                statusMessage = "📦❌"
+                setStatus("📦❌", BlockQuestLiteStatusTone.ERROR)
                 return false
             }
         }
@@ -353,7 +399,8 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         addInventory(recipe.output.first, recipe.output.second)
 
         craftedThisCycle = true
-        statusMessage = "🧪✅"
+        adjustBuddyTrust(3)
+        setStatus("🧪✅", BlockQuestLiteStatusTone.SUCCESS)
         return true
     }
 
@@ -371,10 +418,14 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
 
         if (previousPhase != phase) {
             when (phase) {
-                BlockQuestLitePhase.DUSK -> statusMessage = "🌆 Dusk! Build shelter"
+                BlockQuestLitePhase.DUSK -> {
+                    setStatus("🌆🏠", BlockQuestLiteStatusTone.WARNING)
+                    deliverBuddyHint("dusk")
+                }
+
                 BlockQuestLitePhase.NIGHT -> startNightPhase()
-                BlockQuestLitePhase.DAWN -> statusMessage = "🌤️ Hold on, dawn is near"
-                BlockQuestLitePhase.DAY -> statusMessage = "☀️ New day!"
+                BlockQuestLitePhase.DAWN -> setStatus("🌤️", BlockQuestLiteStatusTone.INFO)
+                BlockQuestLitePhase.DAY -> setStatus("☀️✨", BlockQuestLiteStatusTone.SUCCESS)
             }
         }
 
@@ -386,7 +437,7 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             processNightPressure()
         }
 
-        shelterScore = computeShelterScore()
+        refreshShelter()
         updateOnboardingShelterProgress()
     }
 
@@ -418,7 +469,15 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             nightDamageCooldown,
             blocksMined,
             blocksPlaced,
-            onboardingShelterBuilt
+            onboardingShelterBuilt,
+            buddyTrust,
+            buddyHintCharges,
+            consecutiveRescues,
+            adaptiveGraceNights,
+            rescuedThisCycle,
+            shelterSafety,
+            shelterLightQuality,
+            statusTone.name
         ).joinToString(",")
 
         return listOf(worldString, inventoryString, scalar).joinToString(";")
@@ -431,8 +490,161 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
     internal fun debugSetBlock(x: Int, y: Int, block: BlockQuestLiteBlock) {
         if (!inBounds(x, y)) return
         world[idx(x, y)] = block.ordinal
-        shelterScore = computeShelterScore()
+        refreshShelter()
         updateOnboardingShelterProgress()
+    }
+
+    internal fun debugForceRescue() {
+        rescuePlayer()
+    }
+
+    internal fun evaluateShelter(anchorX: Int = WIDTH / 2, anchorY: Int = 2): BlockQuestLiteShelterEvaluation {
+        val cardinal = listOf(
+            anchorX - 1 to anchorY,
+            anchorX + 1 to anchorY,
+            anchorX to anchorY - 1,
+            anchorX to anchorY + 1
+        )
+        val diagonals = listOf(
+            anchorX - 1 to anchorY - 1,
+            anchorX + 1 to anchorY - 1,
+            anchorX - 1 to anchorY + 1,
+            anchorX + 1 to anchorY + 1
+        )
+
+        var safety = 0
+        cardinal.forEach { (x, y) ->
+            val block = getBlock(x, y)
+            safety += when {
+                isStructural(block) -> 15
+                block == BlockQuestLiteBlock.TORCH -> 7
+                else -> -4
+            }
+        }
+        diagonals.forEach { (x, y) ->
+            val block = getBlock(x, y)
+            safety += when {
+                isStructural(block) -> 6
+                block == BlockQuestLiteBlock.TORCH -> 2
+                else -> -2
+            }
+        }
+
+        var floorSupport = 0
+        for (x in anchorX - 1..anchorX + 1) {
+            val block = getBlock(x, anchorY + 2)
+            floorSupport += when {
+                isStructural(block) -> 6
+                block == BlockQuestLiteBlock.TORCH -> 2
+                else -> 0
+            }
+        }
+        safety += floorSupport
+
+        var roofSupport = 0
+        for (x in anchorX - 1..anchorX + 1) {
+            val block = getBlock(x, anchorY - 1)
+            roofSupport += when {
+                isStructural(block) -> 7
+                block == BlockQuestLiteBlock.TORCH -> 3
+                else -> 0
+            }
+        }
+        safety += roofSupport
+
+        val openings = (cardinal + diagonals).count { (x, y) -> getBlock(x, y) == BlockQuestLiteBlock.AIR }
+        safety -= openings * 5
+
+        val skyExposure = (anchorX - 1..anchorX + 1).count { x ->
+            isOpenToSky(x, anchorY - 1)
+        }
+        safety -= skyExposure * 6
+
+        val enclosureSafety = safety.coerceIn(0, 100)
+
+        var light = 0
+        for (dx in -2..2) {
+            for (dy in -2..2) {
+                val x = anchorX + dx
+                val y = anchorY + dy
+                if (!inBounds(x, y)) continue
+                if (getBlock(x, y) == BlockQuestLiteBlock.TORCH) {
+                    val dist = abs(dx) + abs(dy)
+                    light += when (dist) {
+                        0 -> 20
+                        1 -> 16
+                        2 -> 12
+                        3 -> 8
+                        else -> 5
+                    }
+                }
+            }
+        }
+        val lightPenalty = openings * 2 + skyExposure * 2
+        var lightQuality = (light - lightPenalty).coerceIn(0, 100)
+        if (enclosureSafety < 30) {
+            lightQuality = min(lightQuality, 40)
+        }
+
+        var score = (enclosureSafety * 0.72f + lightQuality * 0.28f).toInt()
+        if (enclosureSafety < 35) {
+            score = min(score, 58)
+        }
+        score = score.coerceIn(0, 100)
+
+        return BlockQuestLiteShelterEvaluation(
+            enclosureSafety = enclosureSafety,
+            lightQuality = lightQuality,
+            score = score,
+            openings = openings
+        )
+    }
+
+    internal fun computeNightPressureChance(
+        shelterScore: Int = this.shelterScore,
+        dayNumber: Int = this.dayNumber,
+        easyMode: Boolean = this.easyMode,
+        bossEventActive: Boolean = this.bossEventActive,
+        boomSproutThreat: Int = this.boomSproutThreat,
+        adaptiveGraceNights: Int = this.adaptiveGraceNights
+    ): Int {
+        val base = when {
+            shelterScore >= 85 -> 8
+            shelterScore >= 70 -> 14
+            shelterScore >= 55 -> 22
+            shelterScore >= 40 -> 30
+            else -> 40
+        }
+
+        val dayPressure = ((dayNumber - 1) / 3) * 4
+        val threatBonus = min(18, boomSproutThreat * 2)
+        val bossBonus = if (bossEventActive) if (easyMode) 8 else 14 else 0
+        val easyRelief = if (easyMode) 14 else 0
+        val earlyChildRelief = if (easyMode && dayNumber <= 2) 8 else 0
+        val graceRelief = adaptiveGraceNights * 12
+
+        return (base + dayPressure + threatBonus + bossBonus - easyRelief - earlyChildRelief - graceRelief)
+            .coerceIn(3, 90)
+    }
+
+    internal fun computeBuddyHintCharges(trust: Int = buddyTrust): Int {
+        return when {
+            trust >= 80 -> 2
+            trust >= 45 -> 1
+            else -> 0
+        }
+    }
+
+    internal fun applyAdaptiveGraceAfterRescue(rescueStreak: Int = consecutiveRescues): Int {
+        if (rescueStreak >= 2) {
+            adaptiveGraceNights = max(adaptiveGraceNights, min(3, rescueStreak - 1))
+        }
+        return adaptiveGraceNights
+    }
+
+    internal fun adjustBuddyTrust(delta: Int): Int {
+        buddyTrust = (buddyTrust + delta).coerceIn(MIN_TRUST, MAX_TRUST)
+        return buddyTrust
     }
 
     private fun restore(payload: String): Boolean {
@@ -479,10 +691,20 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
             skyWyrmEvents = max(0, s[16].toIntOrNull() ?: 0)
             rescuedCount = max(0, s[17].toIntOrNull() ?: 0)
             giftCooldownTicks = max(0, s[18].toIntOrNull() ?: 20)
-            nightDamageCooldown = max(1, s[19].toIntOrNull() ?: 10)
+            nightDamageCooldown = max(1, s[19].toIntOrNull() ?: 12)
             blocksMined = max(0, s.getOrNull(20)?.toIntOrNull() ?: 0)
             blocksPlaced = max(0, s.getOrNull(21)?.toIntOrNull() ?: 0)
             onboardingShelterBuilt = s.getOrNull(22)?.toBooleanStrictOrNull() ?: false
+            buddyTrust = (s.getOrNull(23)?.toIntOrNull() ?: 26).coerceIn(MIN_TRUST, MAX_TRUST)
+            buddyHintCharges = max(0, s.getOrNull(24)?.toIntOrNull() ?: 0)
+            consecutiveRescues = max(0, s.getOrNull(25)?.toIntOrNull() ?: 0)
+            adaptiveGraceNights = max(0, s.getOrNull(26)?.toIntOrNull() ?: 0)
+            rescuedThisCycle = s.getOrNull(27)?.toBooleanStrictOrNull() ?: false
+            shelterSafety = (s.getOrNull(28)?.toIntOrNull() ?: 0).coerceIn(0, 100)
+            shelterLightQuality = (s.getOrNull(29)?.toIntOrNull() ?: 0).coerceIn(0, 100)
+            statusTone = runCatching {
+                BlockQuestLiteStatusTone.valueOf(s.getOrNull(30) ?: BlockQuestLiteStatusTone.INFO.name)
+            }.getOrElse { BlockQuestLiteStatusTone.INFO }
 
             true
         } catch (_: Exception) {
@@ -491,64 +713,88 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
     }
 
     private fun startNightPhase() {
-        statusMessage = "🌙 Night! Boom Sprout is out"
-        boomSproutThreat += if (shelterScore >= 70) 0 else 1
+        setStatus("🌙🌱", BlockQuestLiteStatusTone.WARNING)
+        boomSproutThreat += if (shelterScore >= 78) 0 else 1
+
+        graceShieldCharges = if (adaptiveGraceNights > 0) 1 else 0
+        if (graceShieldCharges > 0) {
+            setStatus("🛡️🌙", BlockQuestLiteStatusTone.INFO)
+        }
+
+        deliverBuddyHint("night")
 
         val isBossNight = dayNumber % 3 == 0
         if (isBossNight) {
             bossEventActive = true
             skyWyrmEvents += 1
-            statusMessage = "🐉 Sky Wyrm event!"
+            setStatus("🐉⚠️", BlockQuestLiteStatusTone.DANGER)
         }
     }
 
     private fun processGlowmewGift() {
         giftCooldownTicks -= 1
-        if (giftCooldownTicks <= 0) {
-            val gift = if ((dayNumber + cycleTick + glowmewGiftMoments) % 3 == 0) {
-                BlockQuestLiteItem.CRYSTAL
-            } else {
-                BlockQuestLiteItem.WOOD
-            }
-            addInventory(gift, 1)
-            glowmewGiftMoments += 1
-            giftCooldownTicks = if (easyMode) 22 else 30
-            statusMessage = "🐾 Glowmew found ${gift.name.lowercase()}"
+        if (giftCooldownTicks > 0) return
+
+        val gift = if ((dayNumber + cycleTick + glowmewGiftMoments) % 3 == 0) {
+            BlockQuestLiteItem.CRYSTAL
+        } else {
+            BlockQuestLiteItem.WOOD
         }
+        addInventory(gift, 1)
+
+        if (buddyTrust >= 70 && (glowmewGiftMoments + dayNumber) % 2 == 0) {
+            addInventory(BlockQuestLiteItem.PLANK, 1)
+        }
+
+        glowmewGiftMoments += 1
+        val trustBoost = buddyTrust / 30
+        giftCooldownTicks = if (easyMode) max(14, 24 - trustBoost) else max(18, 30 - trustBoost)
+        setStatus("🐾🎁", BlockQuestLiteStatusTone.SUCCESS)
     }
 
     private fun processNightPressure() {
         nightDamageCooldown -= 1
         if (nightDamageCooldown > 0) return
 
-        val baseChance = when {
-            shelterScore >= 75 -> 12
-            shelterScore >= 55 -> 35
-            else -> 72
-        }
+        val chance = computeNightPressureChance()
+        val roll = (cycleTick * 7 + dayNumber * 13 + hearts * 5 + boomSproutThreat * 3 + buddyTrust) % 100
 
-        val chance = if (easyMode) max(5, baseChance - 20) else baseChance
-        val bossBonus = if (bossEventActive) 15 else 0
-        val roll = (cycleTick * 7 + dayNumber * 13 + hearts * 5 + boomSproutThreat * 3) % 100
-
-        if (roll < chance + bossBonus) {
-            hearts -= 1
-            boomSproutThreat += 1
-            statusMessage = if (bossEventActive) "🐉 Sky Wyrm struck!" else "🌱 Boom Sprout chased you!"
-            if (hearts <= 0) {
-                rescuePlayer()
+        if (roll < chance) {
+            if (graceShieldCharges > 0) {
+                graceShieldCharges -= 1
+                setStatus("🛡️✨", BlockQuestLiteStatusTone.SUCCESS)
+            } else {
+                hearts -= 1
+                boomSproutThreat += 1
+                adjustBuddyTrust(-2)
+                setStatus(
+                    if (bossEventActive) "🐉💥" else "🌱💥",
+                    if (hearts <= 2) BlockQuestLiteStatusTone.DANGER else BlockQuestLiteStatusTone.WARNING
+                )
+                if (hearts <= 0) {
+                    rescuePlayer()
+                }
             }
+        } else if (chance >= 45) {
+            setStatus("⚠️", BlockQuestLiteStatusTone.WARNING)
         }
 
-        nightDamageCooldown = if (easyMode) 12 else 9
+        nightDamageCooldown = computeNightDamageCooldownTicks()
     }
 
     private fun onSunrise() {
         nightsSurvived += 1
 
-        stars += 1
-        if (craftedThisCycle) stars += 1
-        if (bossEventActive || bossRewardPending) stars += 1
+        val craftedBeforeSunrise = craftedThisCycle
+        var starsGained = 1
+        if (craftedBeforeSunrise) starsGained += 1
+        if (bossEventActive || bossRewardPending) starsGained += 1
+        if (buddyTrust >= 70 && !rescuedThisCycle) starsGained += 1
+        stars += starsGained
+
+        if (buddyTrust >= 85 && !rescuedThisCycle) {
+            addInventory(BlockQuestLiteItem.CRYSTAL, 1)
+        }
 
         unlockTier = 1 + (stars / 4)
 
@@ -557,9 +803,26 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         bossEventActive = false
 
         boomSproutThreat = max(0, boomSproutThreat - 1)
-        nightDamageCooldown = 10
+        nightDamageCooldown = computeNightDamageCooldownTicks()
 
-        statusMessage = "🌅 Sunrise! +stars"
+        if (adaptiveGraceNights > 0 && !rescuedThisCycle) {
+            adaptiveGraceNights = max(0, adaptiveGraceNights - 1)
+        }
+
+        if (!rescuedThisCycle) {
+            val trustGain = when {
+                shelterScore >= 75 -> 5
+                shelterScore >= 55 -> 3
+                else -> 1
+            } + if (craftedBeforeSunrise) 1 else 0
+            adjustBuddyTrust(trustGain)
+            consecutiveRescues = max(0, consecutiveRescues - 1)
+        } else {
+            rescuedThisCycle = false
+        }
+
+        buddyHintCharges = computeBuddyHintCharges()
+        setStatus(if (starsGained >= 3) "🌅⭐🐾" else "🌅⭐", BlockQuestLiteStatusTone.SUCCESS)
     }
 
     private fun rescuePlayer() {
@@ -568,46 +831,46 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         stars = max(0, stars - 1)
         bossEventActive = false
         bossRewardPending = false
-        statusMessage = "🛟 Dawn rescue! Try again"
+        rescuedThisCycle = true
+
+        consecutiveRescues += 1
+        adjustBuddyTrust(-12)
+        val grace = applyAdaptiveGraceAfterRescue()
+        if (grace > 0) {
+            addInventory(BlockQuestLiteItem.TORCH, 1)
+            buddyHintCharges = max(buddyHintCharges, 1)
+        }
+
+        setStatus("🛟🤍", BlockQuestLiteStatusTone.WARNING)
     }
 
-    private fun computeShelterScore(): Int {
-        val anchorX = WIDTH / 2
-        val anchorY = 2
+    private fun refreshShelter() {
+        val evaluation = evaluateShelter()
+        shelterSafety = evaluation.enclosureSafety
+        shelterLightQuality = evaluation.lightQuality
+        shelterScore = evaluation.score
+    }
 
-        var score = 0
+    private fun deliverBuddyHint(reason: String) {
+        if (buddyHintCharges <= 0) return
 
-        val walls = listOf(
-            anchorX - 1 to anchorY,
-            anchorX + 1 to anchorY,
-            anchorX to anchorY - 1,
-            anchorX to anchorY + 1
-        )
+        when {
+            reason == "night" && shelterScore < 55 && getInventory(BlockQuestLiteItem.TORCH) <= 0 && buddyTrust >= 45 -> {
+                addInventory(BlockQuestLiteItem.TORCH, 1)
+                buddyHintCharges -= 1
+                setStatus("🐾🔥", BlockQuestLiteStatusTone.SUCCESS)
+            }
 
-        walls.forEach { (x, y) ->
-            if (getBlock(x, y) != BlockQuestLiteBlock.AIR) score += 20
-        }
+            reason == "night" && shelterSafety < 55 -> {
+                buddyHintCharges -= 1
+                setStatus("🐾🏠", BlockQuestLiteStatusTone.WARNING)
+            }
 
-        val ring = mutableListOf<Pair<Int, Int>>()
-        for (dx in -1..1) {
-            for (dy in -1..1) {
-                if (dx == 0 && dy == 0) continue
-                ring += (anchorX + dx) to (anchorY + dy)
+            reason == "dusk" && shelterLightQuality < 45 -> {
+                buddyHintCharges -= 1
+                setStatus("🐾💡", BlockQuestLiteStatusTone.INFO)
             }
         }
-
-        val openings = ring.count { (x, y) -> getBlock(x, y) == BlockQuestLiteBlock.AIR }
-        score -= openings * 4
-
-        val torchCount = ring.count { (x, y) -> getBlock(x, y) == BlockQuestLiteBlock.TORCH }
-        score += min(3, torchCount) * 8
-
-        val floorBand = (anchorX - 1..anchorX + 1).count { x ->
-            getBlock(x, anchorY + 2) != BlockQuestLiteBlock.AIR
-        }
-        score += floorBand * 5
-
-        return score.coerceIn(0, 100)
     }
 
     private fun updateOnboardingShelterProgress() {
@@ -644,6 +907,33 @@ class BlockQuestLiteEngine(savedPayload: String? = null) {
         inventory[BlockQuestLiteItem.DIRT] = 3
         inventory[BlockQuestLiteItem.WOOD] = 2
         inventory[BlockQuestLiteItem.TORCH] = 1
+    }
+
+    private fun computeNightDamageCooldownTicks(): Int {
+        return when {
+            easyMode && dayNumber <= 3 -> 14
+            easyMode -> 12
+            dayNumber <= 2 -> 11
+            else -> 10
+        }
+    }
+
+    private fun isOpenToSky(x: Int, fromY: Int): Boolean {
+        if (x !in 0 until WIDTH) return true
+        if (fromY < 0) return true
+        for (y in fromY downTo 0) {
+            if (getBlock(x, y) != BlockQuestLiteBlock.AIR) return false
+        }
+        return true
+    }
+
+    private fun isStructural(block: BlockQuestLiteBlock): Boolean {
+        return block != BlockQuestLiteBlock.AIR && block != BlockQuestLiteBlock.TORCH
+    }
+
+    private fun setStatus(message: String, tone: BlockQuestLiteStatusTone) {
+        statusMessage = message
+        statusTone = tone
     }
 
     private fun inBounds(x: Int, y: Int): Boolean {

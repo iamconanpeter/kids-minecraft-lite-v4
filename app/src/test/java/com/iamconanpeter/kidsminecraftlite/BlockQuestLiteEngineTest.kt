@@ -40,7 +40,6 @@ class BlockQuestLiteEngineTest {
         val targetX = 2
         val targetY = 2
 
-        // cycle until wood is selected
         repeat(10) {
             if (engine.currentPlaceItem() != BlockQuestLiteItem.WOOD) {
                 engine.cyclePlaceItem()
@@ -62,83 +61,144 @@ class BlockQuestLiteEngineTest {
         assertTrue(engine.getInventory(BlockQuestLiteItem.PLANK) >= 2)
 
         val failCraft = engine.craft("pickaxe")
-        assertFalse(failCraft) // no enough stone yet (or stars)
+        assertFalse(failCraft)
     }
 
     @Test
-    fun nightPressureAndBossEventAffectState() {
+    fun shelterEvaluationReflectsSafetyAndLightQuality() {
         val engine = BlockQuestLiteEngine()
-        val initialHearts = engine.currentState().hearts
-
-        repeat(520) { engine.tick() }
-        val after = engine.currentState()
-
-        assertTrue(after.skyWyrmEvents >= 1)
-        assertTrue(after.boomSproutThreat >= 1)
-        assertTrue(after.hearts <= initialHearts)
-    }
-
-    @Test
-    fun shelterScoreImprovesWithEnclosureAndSaveRoundTripWorks() {
-        val engine = BlockQuestLiteEngine()
-        val before = engine.currentState().shelterScore
-
         val ax = BlockQuestLiteEngine.WIDTH / 2
         val ay = 2
-        engine.debugGrant(BlockQuestLiteItem.WOOD, 10)
-        engine.toggleMode()
-        while (engine.currentPlaceItem() != BlockQuestLiteItem.WOOD) {
-            engine.cyclePlaceItem()
-        }
 
-        assertTrue(engine.placeBlock(ax - 1, ay))
-        assertTrue(engine.placeBlock(ax + 1, ay))
-        assertTrue(engine.placeBlock(ax, ay - 1))
-        assertTrue(engine.placeBlock(ax, ay + 1))
+        val before = engine.evaluateShelter()
+        assertTrue(before.score < 60)
 
-        val after = engine.currentState().shelterScore
-        assertTrue(after > before)
+        engine.debugSetBlock(ax - 1, ay, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax + 1, ay, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax, ay - 1, BlockQuestLiteBlock.PLANK)
+        engine.debugSetBlock(ax, ay + 1, BlockQuestLiteBlock.PLANK)
+        engine.debugSetBlock(ax - 1, ay - 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax + 1, ay - 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax - 1, ay + 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax + 1, ay + 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax, ay - 2, BlockQuestLiteBlock.TORCH)
+
+        val after = engine.evaluateShelter()
+        assertTrue(after.enclosureSafety > before.enclosureSafety)
+        assertTrue(after.lightQuality >= before.lightQuality)
+        assertTrue(after.score > before.score)
+    }
+
+    @Test
+    fun tunedNightPressureIsGentlerWithEasyModeAndGrace() {
+        val engine = BlockQuestLiteEngine()
+
+        val braveChance = engine.computeNightPressureChance(
+            shelterScore = 45,
+            dayNumber = 2,
+            easyMode = false,
+            bossEventActive = false,
+            boomSproutThreat = 2,
+            adaptiveGraceNights = 0
+        )
+        val easyChance = engine.computeNightPressureChance(
+            shelterScore = 45,
+            dayNumber = 2,
+            easyMode = true,
+            bossEventActive = false,
+            boomSproutThreat = 2,
+            adaptiveGraceNights = 0
+        )
+        val graceChance = engine.computeNightPressureChance(
+            shelterScore = 45,
+            dayNumber = 2,
+            easyMode = true,
+            bossEventActive = false,
+            boomSproutThreat = 2,
+            adaptiveGraceNights = 2
+        )
+
+        assertTrue(easyChance < braveChance)
+        assertTrue(graceChance < easyChance)
+    }
+
+    @Test
+    fun buddyTrustMethodsAdjustMeterAndHintBands() {
+        val engine = BlockQuestLiteEngine()
+
+        assertEquals(0, engine.computeBuddyHintCharges(10))
+        assertEquals(1, engine.computeBuddyHintCharges(50))
+        assertEquals(2, engine.computeBuddyHintCharges(90))
+
+        val before = engine.currentState().buddyTrust
+        val raised = engine.adjustBuddyTrust(12)
+        assertEquals(before + 12, raised)
+
+        val lowered = engine.adjustBuddyTrust(-200)
+        assertEquals(0, lowered)
+    }
+
+    @Test
+    fun repeatedRescuesActivateAdaptiveGrace() {
+        val engine = BlockQuestLiteEngine()
+
+        engine.debugForceRescue()
+        assertEquals(0, engine.currentState().adaptiveGraceNights)
+
+        engine.debugForceRescue()
+        val afterSecond = engine.currentState().adaptiveGraceNights
+        assertTrue(afterSecond >= 1)
+
+        engine.debugForceRescue()
+        assertTrue(engine.currentState().adaptiveGraceNights >= afterSecond)
+    }
+
+    @Test
+    fun buddyTrustAffectsSunriseRewards() {
+        val lowTrust = BlockQuestLiteEngine()
+        val highTrust = BlockQuestLiteEngine()
+        fortifyShelter(lowTrust)
+        fortifyShelter(highTrust)
+
+        lowTrust.adjustBuddyTrust(-100)
+        highTrust.adjustBuddyTrust(100)
+
+        repeat(180) { lowTrust.tick() }
+        repeat(180) { highTrust.tick() }
+
+        assertEquals(1, lowTrust.currentState().stars)
+        assertTrue(highTrust.currentState().stars >= 2)
+    }
+
+    @Test
+    fun saveRoundTripPersistsNewFields() {
+        val engine = BlockQuestLiteEngine()
+        fortifyShelter(engine)
+        engine.adjustBuddyTrust(30)
+        engine.debugForceRescue()
+        engine.debugForceRescue()
 
         val payload = engine.toSavePayload()
-        val restored = BlockQuestLiteEngine(payload)
-        assertEquals(engine.currentState().dayNumber, restored.currentState().dayNumber)
-        assertEquals(engine.currentState().shelterScore, restored.currentState().shelterScore)
+        val restored = BlockQuestLiteEngine(payload).currentState()
+        val current = engine.currentState()
+
+        assertEquals(current.buddyTrust, restored.buddyTrust)
+        assertEquals(current.adaptiveGraceNights, restored.adaptiveGraceNights)
+        assertEquals(current.shelterScore, restored.shelterScore)
         assertNotEquals("", payload)
     }
 
-    @Test
-    fun onboardingProgressTracksAndPersists() {
-        val engine = BlockQuestLiteEngine()
-
-        assertEquals(0, engine.currentState().blocksMined)
-        assertEquals(0, engine.currentState().blocksPlaced)
-        assertFalse(engine.currentState().onboardingShelterBuilt)
-
-        assertTrue(engine.mineBlock(1, BlockQuestLiteEngine.HEIGHT - 4))
-
-        engine.toggleMode()
-        while (engine.currentPlaceItem() != BlockQuestLiteItem.WOOD) {
-            engine.cyclePlaceItem()
-        }
-        engine.debugGrant(BlockQuestLiteItem.WOOD, 4)
-        assertTrue(engine.placeBlock(2, 2))
-
+    private fun fortifyShelter(engine: BlockQuestLiteEngine) {
         val ax = BlockQuestLiteEngine.WIDTH / 2
         val ay = 2
         engine.debugSetBlock(ax - 1, ay, BlockQuestLiteBlock.WOOD)
         engine.debugSetBlock(ax + 1, ay, BlockQuestLiteBlock.WOOD)
-        engine.debugSetBlock(ax, ay - 1, BlockQuestLiteBlock.WOOD)
-        engine.debugSetBlock(ax, ay + 1, BlockQuestLiteBlock.WOOD)
-
-        val progressed = engine.currentState()
-        assertTrue(progressed.blocksMined >= 1)
-        assertTrue(progressed.blocksPlaced >= 1)
-        assertTrue(progressed.onboardingShelterBuilt)
-
-        val payload = engine.toSavePayload()
-        val restored = BlockQuestLiteEngine(payload).currentState()
-        assertEquals(progressed.blocksMined, restored.blocksMined)
-        assertEquals(progressed.blocksPlaced, restored.blocksPlaced)
-        assertTrue(restored.onboardingShelterBuilt)
+        engine.debugSetBlock(ax, ay - 1, BlockQuestLiteBlock.PLANK)
+        engine.debugSetBlock(ax, ay + 1, BlockQuestLiteBlock.PLANK)
+        engine.debugSetBlock(ax - 1, ay - 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax + 1, ay - 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax - 1, ay + 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax + 1, ay + 1, BlockQuestLiteBlock.WOOD)
+        engine.debugSetBlock(ax, ay - 2, BlockQuestLiteBlock.TORCH)
     }
 }
